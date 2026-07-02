@@ -35,9 +35,18 @@ services:
     healthcheck:
       test: exit 0
   order-service:
+    profiles: ["order-service"]
     build: ./order-service
     ports:
       - "8080:8080"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+  order-service-vt:
+    profiles: ["order-service-vt"]
+    build: ./order-service-vt
+    ports:
+      - "8080:8083"
     depends_on:
       mongodb:
         condition: service_healthy
