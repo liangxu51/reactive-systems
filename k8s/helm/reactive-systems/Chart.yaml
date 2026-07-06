@@ -1,0 +1,6 @@
+apiVersion: v2
+name: reactive-systems
+description: Helm chart for the reactive order-processing pipeline (order, inventory, shipping services, Kafka, MongoDB, frontend), intended for local minikube use.
+type: application
+version: 0.1.0
+appVersion: "0.0.1"

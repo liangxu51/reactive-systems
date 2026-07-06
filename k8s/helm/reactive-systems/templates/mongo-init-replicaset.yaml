@@ -1,0 +1,32 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mongo-init-replicaset
+  labels:
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "1"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mongo-init-replicaset
+          image: {{ .Values.mongodb.image }}
+          command:
+            - sh
+            - -c
+            - |
+              until mongo --host {{ .Values.mongodb.serviceName }} --eval "print('ok')"; do
+                echo waiting for mongo-db; sleep 2;
+              done
+              mongo --host {{ .Values.mongodb.serviceName }} --eval "
+                if (rs.status().ok === 1) {
+                  print('replica set already initiated');
+                } else {
+                  rs.initiate({_id: 'rs0', members: [{_id: 0, host: '{{ .Values.mongodb.serviceName }}:27017'}]});
+                }
+              "

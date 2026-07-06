@@ -13,7 +13,7 @@ This is a tutorial project for Baeldung demonstrating reactive systems in Java. 
 | `order-service` | 8080 | REST API entry point; persists orders and orchestrates the workflow |
 | `inventory-service` | 8081 | Reserves or reverts product stock |
 | `shipping-service` | 8082 | Creates shipment records (only accepts orders between 10:00–18:00) |
-| `frontend` | 80 (Docker) / 4200 (dev) | Angular 9 UI showing reactive vs. blocking order streaming |
+| `frontend` | 80 (Docker) / 4200 (dev) | React UI showing reactive vs. blocking order streaming |
 
 ## Build & Run Commands
 
@@ -30,14 +30,14 @@ mvn clean package -pl order-service
 mvn spring-boot:run -pl order-service
 ```
 
-### Frontend (Angular 9)
+### Frontend (React + Vite, plain JavaScript)
 
 ```bash
 cd frontend
 npm install
-npm start        # dev server at http://localhost:4200
-npm test         # Karma/Jasmine unit tests
+npm run dev      # dev server at http://localhost:4200
 npm run build    # production build
+npm run preview  # serve the production build locally
 ```
 
 ### Run everything with Docker Compose
@@ -82,8 +82,8 @@ The `OrderStatus` enum in each service (e.g., `order-service/.../constants/Order
 
 ## Frontend: Reactive vs. Blocking Demo
 
-The Angular app has two services side-by-side:
-- `orders-reactive.service.ts` — uses `EventSource` (SSE) to stream orders reactively from `GET /api/orders` as a `Flux<Order>` with `text/event-stream`.
-- `orders-blocking.service.ts` — uses `HttpClient.get()` to fetch the full list at once.
+The React app (`frontend/src/`) has two fetching strategies side-by-side, both defined in `api/ordersApi.js` and `hooks/useOrderStream.js`:
+- `useOrderStream` — opens a native `EventSource` (SSE) to stream orders reactively from `GET /api/orders` as a `Flux<Order>` with `text/event-stream`, with cleanup on unmount/deactivation via the `useEffect` return function.
+- `fetchOrders` (in `ordersApi.js`) — a plain `fetch()` GET that returns the full list at once, triggered from a button click rather than on mount.
 
 The `OrderController` exposes the same `GET /api/orders` endpoint; Spring WebFlux automatically handles SSE when the client sends `Accept: text/event-stream`.

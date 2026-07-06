@@ -1,0 +1,63 @@
+{{- if .Values.orderServiceVt.enabled }}
+{{- if .Values.orderService.enabled }}
+{{- fail "orderService and orderServiceVt are alternatives (both bind the order-service Kafka/Mongo workload) - enable only one." }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service-vt
+  labels:
+    app: order-service-vt
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.orderServiceVt.replicaCount }}
+  selector:
+    matchLabels:
+      app: order-service-vt
+  template:
+    metadata:
+      labels:
+        app: order-service-vt
+    spec:
+      initContainers:
+        - name: wait-for-mongo-kafka
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z {{ .Values.mongodb.serviceName }} {{ .Values.mongodb.port }} && nc -z {{ .Values.kafka.serviceName }} {{ .Values.kafka.port }}; do
+                echo waiting for mongo-db and kafka-broker; sleep 2;
+              done
+      containers:
+        - name: order-service-vt
+          image: "{{ .Values.orderServiceVt.image.repository }}:{{ .Values.orderServiceVt.image.tag }}"
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - containerPort: {{ .Values.orderServiceVt.containerPort }}
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.orderServiceVt.containerPort }}
+            initialDelaySeconds: 15
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.orderServiceVt.containerPort }}
+            initialDelaySeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  # Named "order-service" (not "order-service-vt") so it's a drop-in
+  # replacement for the order-service Service that the frontend and
+  # port-forward instructions target.
+  name: order-service
+  labels:
+    app: order-service-vt
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: order-service-vt
+  ports:
+    - port: {{ .Values.orderServiceVt.servicePort }}
+      targetPort: {{ .Values.orderServiceVt.containerPort }}
+{{- end }}

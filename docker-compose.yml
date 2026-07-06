@@ -28,12 +28,30 @@ services:
   mongodb:
     container_name: mongo-db
     image: mongo:4.4
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     volumes:
       - ~/mongo:/data/db
     ports:
       - "27017:27017"
     healthcheck:
-      test: exit 0
+      test: echo 'db.runCommand("ping").ok' | mongo --quiet
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  mongo-init-replicaset:
+    image: mongo:4.4
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    restart: "no"
+    command: >
+      mongo --host mongo-db --eval "
+        if (rs.status().ok === 1) {
+          print('replica set already initiated');
+        } else {
+          rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'mongo-db:27017'}]});
+        }
+      "
   order-service:
     profiles: ["order-service"]
     build: ./order-service
@@ -42,6 +60,8 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+      mongo-init-replicaset:
+        condition: service_completed_successfully
   order-service-vt:
     profiles: ["order-service-vt"]
     build: ./order-service-vt
@@ -50,6 +70,8 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+      mongo-init-replicaset:
+        condition: service_completed_successfully
   inventory-service:
     build: ./inventory-service
     ports:
@@ -57,6 +79,8 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+      mongo-init-replicaset:
+        condition: service_completed_successfully
   shipping-service:
     build: ./shipping-service
     ports:
@@ -64,3 +88,5 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+      mongo-init-replicaset:
+        condition: service_completed_successfully

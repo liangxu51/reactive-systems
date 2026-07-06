@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zookeeper
+  labels:
+    app: zookeeper
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zookeeper
+  template:
+    metadata:
+      labels:
+        app: zookeeper
+    spec:
+      containers:
+        - name: zookeeper
+          image: {{ .Values.zookeeper.image }}
+          env:
+            - name: ZOOKEEPER_CLIENT_PORT
+              value: "{{ .Values.zookeeper.clientPort }}"
+            - name: ZOOKEEPER_TICK_TIME
+              value: "{{ .Values.zookeeper.tickTime }}"
+          ports:
+            - containerPort: {{ .Values.zookeeper.clientPort }}
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.zookeeper.clientPort }}
+            initialDelaySeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.zookeeper.clientPort }}
+            initialDelaySeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.zookeeper.serviceName }}
+  labels:
+    app: zookeeper
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: zookeeper
+  ports:
+    - port: {{ .Values.zookeeper.clientPort }}
+      targetPort: {{ .Values.zookeeper.clientPort }}

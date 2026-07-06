@@ -1,0 +1,79 @@
+# Default values target a local minikube cluster.
+# Build the service images into minikube's own Docker daemon first:
+#   eval $(minikube docker-env)
+#   mvn clean package -pl order-service,inventory-service,shipping-service
+#   docker build -t order-service:latest order-service
+#   docker build -t inventory-service:latest inventory-service
+#   docker build -t shipping-service:latest shipping-service
+#   (cd frontend && npm ci && npm run build) && docker build -t frontend:latest frontend
+imagePullPolicy: IfNotPresent
+
+mongodb:
+  image: mongo:4.4
+  # Matches the hostname baked into application-docker.properties.
+  serviceName: mongo-db
+  port: 27017
+  persistence:
+    enabled: true
+    size: 1Gi
+
+zookeeper:
+  image: confluentinc/cp-zookeeper:latest
+  serviceName: zookeeper
+  clientPort: 2181
+  tickTime: 2000
+
+kafka:
+  image: confluentinc/cp-kafka:7.4.0
+  # Matches the hostname baked into application-docker.properties.
+  serviceName: kafka-broker
+  port: 9092
+  brokerId: 1
+  offsetsTopicReplicationFactor: 1
+
+orderService:
+  enabled: true
+  image:
+    repository: order-service
+    tag: latest
+  containerPort: 8080
+  servicePort: 8080
+  replicaCount: 1
+
+# Virtual-thread variant of order-service (see order-service-vt module).
+# Mutually exclusive with orderService: both would consume/produce on the
+# same Kafka topic and Mongo collection, mirroring the docker-compose
+# profiles "order-service" / "order-service-vt".
+orderServiceVt:
+  enabled: false
+  image:
+    repository: order-service-vt
+    tag: latest
+  containerPort: 8083
+  servicePort: 8080
+  replicaCount: 1
+
+inventoryService:
+  image:
+    repository: inventory-service
+    tag: latest
+  containerPort: 8081
+  servicePort: 8081
+  replicaCount: 1
+
+shippingService:
+  image:
+    repository: shipping-service
+    tag: latest
+  replicaCount: 1
+
+frontend:
+  image:
+    repository: frontend
+    tag: latest
+  containerPort: 80
+  servicePort: 80
+  replicaCount: 1
+  service:
+    # NodePort so `minikube service frontend` can open it from the host.
+    type: NodePort

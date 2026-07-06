@@ -1,0 +1,77 @@
+{{- if .Values.mongodb.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongo-db-data
+  labels:
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.mongodb.persistence.size }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongo-db
+  labels:
+    app: mongo-db
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mongo-db
+  template:
+    metadata:
+      labels:
+        app: mongo-db
+    spec:
+      containers:
+        - name: mongo-db
+          image: {{ .Values.mongodb.image }}
+          # inventory-service uses reactive MongoDB transactions, which
+          # only work against a replica set - see mongo-init-replicaset.yaml
+          # for the one-time rs.initiate() that turns this single node into
+          # a (single-member) replica set named rs0.
+          command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+          ports:
+            - containerPort: 27017
+          volumeMounts:
+            - name: data
+              mountPath: /data/db
+          readinessProbe:
+            tcpSocket:
+              port: 27017
+            initialDelaySeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 27017
+            initialDelaySeconds: 15
+      volumes:
+        - name: data
+          {{- if .Values.mongodb.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: mongo-db-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.mongodb.serviceName }}
+  labels:
+    app: mongo-db
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: mongo-db
+  ports:
+    - port: {{ .Values.mongodb.port }}
+      targetPort: 27017
