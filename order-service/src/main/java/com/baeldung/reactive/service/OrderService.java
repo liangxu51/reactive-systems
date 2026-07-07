@@ -34,9 +34,9 @@ public class OrderService {
                     .collect(Collectors.toList()));
             })
             .flatMap(orderRepository::save)
-            .map(o -> {
-                orderProducer.sendMessage(o.setOrderStatus(OrderStatus.INITIATION_SUCCESS));
-                return o;
+            .doOnNext(o -> {
+                o.setOrderStatus(OrderStatus.INITIATION_SUCCESS);
+                orderProducer.sendMessage(o);
             })
             .onErrorResume(err -> {
                 return Mono.just(order.setOrderStatus(OrderStatus.FAILURE)
