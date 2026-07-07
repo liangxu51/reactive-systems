@@ -1,0 +1,26 @@
+### Create an order
+POST http://localhost:8080/api/orders
+Content-Type: application/json
+
+{
+  "userId": "u1",
+  "lineItems": [
+    { "productId": "60f1b0b3b3f1b3f1b3f1b3f1", "quantity": 2 }
+  ],
+  "paymentMode": "CARD",
+  "shippingAddress": {
+    "name": "Jane Doe",
+    "house": "221B",
+    "street": "Baker Street",
+    "city": "London",
+    "zip": "NW16XE"
+  }
+}
+
+### Stream all orders (SSE)
+GET http://localhost:8080/api/orders
+Accept: text/event-stream
+
+### Get all orders (plain JSON)
+GET http://localhost:8080/api/orders
+Accept: application/json
