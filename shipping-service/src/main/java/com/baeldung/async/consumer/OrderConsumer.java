@@ -39,7 +39,8 @@ public class OrderConsumer {
                     orderProducer.sendMessage(order.setOrderStatus(OrderStatus.SHIPPING_FAILURE)
                         .setResponseMessage(e.getMessage()));
                 })
-                .subscribe();
+                .subscribe(o -> {
+                }, e -> log.error("Failed to process order {} for status {}", order.getId(), order.getOrderStatus(), e));
         }
     }
 }
