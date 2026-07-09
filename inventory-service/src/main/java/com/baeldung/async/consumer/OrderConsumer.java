@@ -38,7 +38,8 @@ public class OrderConsumer {
                     orderProducer.sendMessage(order.setOrderStatus(OrderStatus.INVENTORY_FAILURE)
                         .setResponseMessage(e.getMessage()));
                 })
-                .subscribe();
+                .subscribe(o -> {
+                }, e -> log.error("Failed to process order {} for status {}", order.getId(), order.getOrderStatus(), e));
         } else if (OrderStatus.REVERT_INVENTORY.equals(order.getOrderStatus())) {
             productService.revertOrder(order)
                 .doOnSuccess(o -> {
@@ -51,7 +52,8 @@ public class OrderConsumer {
                     orderProducer.sendMessage(order.setOrderStatus(OrderStatus.INVENTORY_REVERT_FAILURE)
                         .setResponseMessage(e.getMessage()));
                 })
-                .subscribe();
+                .subscribe(o -> {
+                }, e -> log.error("Failed to revert order {} for status {}", order.getId(), order.getOrderStatus(), e));
         }
     }
 }
