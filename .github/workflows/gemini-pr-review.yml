@@ -22,17 +22,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Prepare prompt context
-        run: |
-          mkdir -p .gemini
-          jq -n \
-            --arg repo "${REPOSITORY}" \
-            --arg pr "${PULL_REQUEST_NUMBER}" \
-            '{repository: $repo, pull_request_number: $pr, additional_context: "This repo is a Baeldung tutorial project demonstrating reactive, event-driven microservices (Spring WebFlux/Reactor, Kafka, MongoDB) plus a React frontend. Read CLAUDE.md at the repo root for architecture and conventions before reviewing. Do not flag scope creep as a blocker unless it adds unrelated code to the module."}' > .gemini/context.json
-        env:
-          REPOSITORY: ${{ github.repository }}
-          PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
-
       - name: Run Gemini pull request review
         uses: google-github-actions/run-gemini-cli@v0
         env:
@@ -71,6 +60,42 @@ jobs:
                 "core": []
               }
             }
-          extensions: |
-            ["https://github.com/gemini-cli-extensions/code-review"]
-          prompt: '/pr-code-review'
+          prompt: |
+            Review pull request #${{ github.event.pull_request.number }} in the
+            ${{ github.repository }} repository.
+
+            Context: this repo is a Baeldung tutorial project demonstrating
+            reactive, event-driven microservices (Spring WebFlux/Reactor, Kafka,
+            MongoDB) plus a React frontend. Read CLAUDE.md at the repo root for
+            architecture and conventions before reviewing. Do not flag scope
+            creep unless a change adds code unrelated to the module it touches.
+
+            Call these tools in order, using exactly these method values:
+
+            1. pull_request_read with method "get" (owner, repo, pullNumber) to
+               read the PR title and description.
+            2. pull_request_read with method "get_diff" (owner, repo, pullNumber)
+               to read the full diff.
+            3. Review the diff for: correctness (reactive Mono/Flux chains that
+               block or aren't subscribed, Kafka consumer error handling, saga /
+               OrderStatus consistency), security (no new unauthenticated
+               endpoints, no secrets or PII logged, input validation at service
+               boundaries), code quality (follows existing patterns in the
+               touched service, no unrelated scope creep), and test coverage
+               (new business logic has tests, existing tests aren't weakened
+               without justification).
+            4. pull_request_review_write with method "create" (owner, repo,
+               pullNumber) and no "event" field, to start a pending review.
+            5. For each specific issue found, add_comment_to_pending_review with
+               owner, repo, pullNumber, path, line, side ("RIGHT" for an added
+               line, "LEFT" for a removed line), subjectType "LINE", and a body
+               explaining the issue and a suggested fix. Only comment on lines
+               that changed in the diff.
+            6. pull_request_review_write with method "submit_pending", event
+               "COMMENT", and a body containing a short top-level summary (2-4
+               sentences) of the PR and your overall assessment. Always use
+               event "COMMENT" - never "APPROVE" or "REQUEST_CHANGES".
+
+            If you find no issues worth flagging, still perform steps 1, 2, 4,
+            and 6 with a short summary noting the PR looks good, so the
+            reviewer knows the automation ran.
