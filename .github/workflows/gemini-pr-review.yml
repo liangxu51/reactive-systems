@@ -1,0 +1,97 @@
+name: Gemini PR Review
+
+on:
+  pull_request:
+    types: [opened, reopened]
+
+concurrency:
+  group: gemini-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run Gemini pull request review
+        uses: google-github-actions/run-gemini-cli@v0
+        env:
+          GEMINI_CLI_TRUST_WORKSPACE: 'true'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        with:
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          gemini_model: gemini-3.1-flash-lite
+          github_pr_number: ${{ github.event.pull_request.number }}
+          settings: |
+            {
+              "mcpServers": {
+                "github": {
+                  "command": "docker",
+                  "args": [
+                    "run",
+                    "-i",
+                    "--rm",
+                    "-e",
+                    "GITHUB_PERSONAL_ACCESS_TOKEN",
+                    "ghcr.io/github/github-mcp-server:v0.27.0"
+                  ],
+                  "includeTools": [
+                    "add_comment_to_pending_review",
+                    "pull_request_read",
+                    "pull_request_review_write"
+                  ],
+                  "env": {
+                    "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+                  }
+                }
+              }
+            }
+          prompt: |
+            Review pull request #${{ github.event.pull_request.number }} in the
+            ${{ github.repository }} repository.
+
+            Context: this repo is a Baeldung tutorial project demonstrating
+            reactive, event-driven microservices (Spring WebFlux/Reactor, Kafka,
+            MongoDB) plus a React frontend. Read CLAUDE.md at the repo root for
+            architecture and conventions before reviewing. Do not flag scope
+            creep unless a change adds code unrelated to the module it touches.
+
+            Call these tools in order, using exactly these method values:
+
+            1. pull_request_read with method "get" (owner, repo, pullNumber) to
+               read the PR title and description.
+            2. pull_request_read with method "get_diff" (owner, repo, pullNumber)
+               to read the full diff.
+            3. Review the diff for: correctness (reactive Mono/Flux chains that
+               block or aren't subscribed, Kafka consumer error handling, saga /
+               OrderStatus consistency), security (no new unauthenticated
+               endpoints, no secrets or PII logged, input validation at service
+               boundaries), code quality (follows existing patterns in the
+               touched service, no unrelated scope creep), and test coverage
+               (new business logic has tests, existing tests aren't weakened
+               without justification).
+            4. pull_request_review_write with method "create" (owner, repo,
+               pullNumber) and no "event" field, to start a pending review.
+            5. For each specific issue found, add_comment_to_pending_review with
+               owner, repo, pullNumber, path, line, side ("RIGHT" for an added
+               line, "LEFT" for a removed line), subjectType "LINE", and a body
+               explaining the issue and a suggested fix. Only comment on lines
+               that changed in the diff.
+            6. pull_request_review_write with method "submit_pending", event
+               "COMMENT", and a body containing a short top-level summary (2-4
+               sentences) of the PR and your overall assessment. Always use
+               event "COMMENT" - never "APPROVE" or "REQUEST_CHANGES".
+
+            If you find no issues worth flagging, still perform steps 1, 2, 4,
+            and 6 with a short summary noting the PR looks good, so the
+            reviewer knows the automation ran.
