@@ -1,5 +1,6 @@
 package com.baeldung.reactive.service;
 
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalTime;
 
@@ -18,23 +19,27 @@ import reactor.core.publisher.Mono;
 @Service
 public class ShippingService {
 
+    private static final LocalTime SHIPPING_WINDOW_START = LocalTime.of(10, 0);
+    private static final LocalTime SHIPPING_WINDOW_END = LocalTime.of(18, 0);
+
     @Autowired
     ShipmentRepository shipmentRepository;
+
+    @Autowired
+    Clock clock;
 
     public Mono<Order> handleOrder(Order order) {
         log.info("Handle order invoked with: {}", order);
         return Mono.just(order)
             .flatMap(o -> {
-                LocalDate shippingDate = null;
-                if (LocalTime.now().isAfter(LocalTime.parse("10:00"))
-                    && LocalTime.now().isBefore(LocalTime.parse("18:00"))) 
-                {
-                    shippingDate = LocalDate.now().plusDays(1);
+                LocalTime now = LocalTime.now(clock);
+                if (now.isAfter(SHIPPING_WINDOW_START) && now.isBefore(SHIPPING_WINDOW_END)) {
+                    LocalDate shippingDate = LocalDate.now(clock).plusDays(1);
+                    return shipmentRepository.save(new Shipment().setAddress(order.getShippingAddress())
+                        .setShippingDate(shippingDate));
                 } else {
                     return Mono.error(new RuntimeException("The current time is off the limits to place order."));
                 }
-                return shipmentRepository.save(new Shipment().setAddress(order.getShippingAddress())
-                    .setShippingDate(shippingDate));
             })
             .map(s -> order.setShippingDate(s.getShippingDate())
                 .setOrderStatus(OrderStatus.SUCCESS));
