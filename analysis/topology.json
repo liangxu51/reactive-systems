@@ -1,0 +1,687 @@
+{
+  "system": "reactive-systems",
+  "root": {
+    "id": "sys",
+    "name": "reactive-systems",
+    "kind": "system",
+    "children": [
+      {
+        "id": "dom:order-service",
+        "name": "Order Orchestration (reactive)",
+        "kind": "domain",
+        "children": [
+          {
+            "id": "order-service.AsyncApplication",
+            "name": "AsyncApplication",
+            "kind": "module",
+            "language": "java",
+            "loc": 13,
+            "file": "order-service/src/main/java/com/baeldung/AsyncApplication.java"
+          },
+          {
+            "id": "order-service.ExceptionController",
+            "name": "ExceptionController",
+            "kind": "module",
+            "language": "java",
+            "loc": 20,
+            "file": "order-service/src/main/java/com/baeldung/reactive/controller/ExceptionController.java"
+          },
+          {
+            "id": "order-service.OrderController",
+            "name": "OrderController",
+            "kind": "module",
+            "language": "java",
+            "loc": 47,
+            "file": "order-service/src/main/java/com/baeldung/reactive/controller/OrderController.java"
+          },
+          {
+            "id": "order-service.OrderService",
+            "name": "OrderService",
+            "kind": "module",
+            "language": "java",
+            "loc": 52,
+            "file": "order-service/src/main/java/com/baeldung/reactive/service/OrderService.java"
+          },
+          {
+            "id": "order-service.OrderRepository",
+            "name": "OrderRepository",
+            "kind": "module",
+            "language": "java",
+            "loc": 10,
+            "file": "order-service/src/main/java/com/baeldung/reactive/repository/OrderRepository.java"
+          },
+          {
+            "id": "order-service.OrderConsumer",
+            "name": "OrderConsumer",
+            "kind": "module",
+            "language": "java",
+            "loc": 50,
+            "file": "order-service/src/main/java/com/baeldung/async/consumer/OrderConsumer.java"
+          },
+          {
+            "id": "order-service.OrderProducer",
+            "name": "OrderProducer",
+            "kind": "module",
+            "language": "java",
+            "loc": 28,
+            "file": "order-service/src/main/java/com/baeldung/async/producer/OrderProducer.java"
+          }
+        ]
+      },
+      {
+        "id": "dom:order-service-vt",
+        "name": "Order Orchestration (virtual-thread variant)",
+        "kind": "domain",
+        "children": [
+          {
+            "id": "order-service-vt.VirtualThreadOrderApplication",
+            "name": "VirtualThreadOrderApplication",
+            "kind": "module",
+            "language": "java",
+            "loc": 25,
+            "file": "order-service-vt/src/main/java/com/baeldung/vt/VirtualThreadOrderApplication.java"
+          },
+          {
+            "id": "order-service-vt.OrderController",
+            "name": "OrderController",
+            "kind": "module",
+            "language": "java",
+            "loc": 65,
+            "file": "order-service-vt/src/main/java/com/baeldung/vt/controller/OrderController.java"
+          },
+          {
+            "id": "order-service-vt.OrderConsumer",
+            "name": "OrderConsumer",
+            "kind": "module",
+            "language": "java",
+            "loc": 40,
+            "file": "order-service-vt/src/main/java/com/baeldung/vt/consumer/OrderConsumer.java"
+          },
+          {
+            "id": "order-service-vt.OrderService",
+            "name": "OrderService",
+            "kind": "module",
+            "language": "java",
+            "loc": 48,
+            "file": "order-service-vt/src/main/java/com/baeldung/vt/service/OrderService.java"
+          },
+          {
+            "id": "order-service-vt.OrderRepository",
+            "name": "OrderRepository",
+            "kind": "module",
+            "language": "java",
+            "loc": 10,
+            "file": "order-service-vt/src/main/java/com/baeldung/vt/repository/OrderRepository.java"
+          },
+          {
+            "id": "order-service-vt.OrderProducer",
+            "name": "OrderProducer",
+            "kind": "module",
+            "language": "java",
+            "loc": 23,
+            "file": "order-service-vt/src/main/java/com/baeldung/vt/producer/OrderProducer.java"
+          }
+        ]
+      },
+      {
+        "id": "dom:inventory-service",
+        "name": "Inventory / Stock Reservation",
+        "kind": "domain",
+        "children": [
+          {
+            "id": "inventory-service.AsyncApplication",
+            "name": "AsyncApplication",
+            "kind": "module",
+            "language": "java",
+            "loc": 46,
+            "file": "inventory-service/src/main/java/com/baeldung/AsyncApplication.java"
+          },
+          {
+            "id": "inventory-service.ProductController",
+            "name": "ProductController",
+            "kind": "module",
+            "language": "java",
+            "loc": 30,
+            "file": "inventory-service/src/main/java/com/baeldung/reactive/controller/ProductController.java"
+          },
+          {
+            "id": "inventory-service.ProductService",
+            "name": "ProductService",
+            "kind": "module",
+            "language": "java",
+            "loc": 70,
+            "file": "inventory-service/src/main/java/com/baeldung/reactive/service/ProductService.java"
+          },
+          {
+            "id": "inventory-service.ProductRepository",
+            "name": "ProductRepository",
+            "kind": "module",
+            "language": "java",
+            "loc": 10,
+            "file": "inventory-service/src/main/java/com/baeldung/reactive/repository/ProductRepository.java"
+          },
+          {
+            "id": "inventory-service.OrderConsumer",
+            "name": "OrderConsumer",
+            "kind": "module",
+            "language": "java",
+            "loc": 57,
+            "file": "inventory-service/src/main/java/com/baeldung/async/consumer/OrderConsumer.java"
+          },
+          {
+            "id": "inventory-service.OrderProducer",
+            "name": "OrderProducer",
+            "kind": "module",
+            "language": "java",
+            "loc": 23,
+            "file": "inventory-service/src/main/java/com/baeldung/async/producer/OrderProducer.java"
+          }
+        ]
+      },
+      {
+        "id": "dom:shipping-service",
+        "name": "Shipping / Fulfillment",
+        "kind": "domain",
+        "children": [
+          {
+            "id": "shipping-service.AsyncApplication",
+            "name": "AsyncApplication",
+            "kind": "module",
+            "language": "java",
+            "loc": 13,
+            "file": "shipping-service/src/main/java/com/baeldung/AsyncApplication.java"
+          },
+          {
+            "id": "shipping-service.ShippingService",
+            "name": "ShippingService",
+            "kind": "module",
+            "language": "java",
+            "loc": 43,
+            "file": "shipping-service/src/main/java/com/baeldung/reactive/service/ShippingService.java"
+          },
+          {
+            "id": "shipping-service.ShipmentRepository",
+            "name": "ShipmentRepository",
+            "kind": "module",
+            "language": "java",
+            "loc": 10,
+            "file": "shipping-service/src/main/java/com/baeldung/reactive/repository/ShipmentRepository.java"
+          },
+          {
+            "id": "shipping-service.OrderConsumer",
+            "name": "OrderConsumer",
+            "kind": "module",
+            "language": "java",
+            "loc": 45,
+            "file": "shipping-service/src/main/java/com/baeldung/async/consumer/OrderConsumer.java"
+          },
+          {
+            "id": "shipping-service.OrderProducer",
+            "name": "OrderProducer",
+            "kind": "module",
+            "language": "java",
+            "loc": 23,
+            "file": "shipping-service/src/main/java/com/baeldung/async/producer/OrderProducer.java"
+          }
+        ]
+      },
+      {
+        "id": "dom:frontend",
+        "name": "Frontend (React/Vite UI)",
+        "kind": "domain",
+        "children": [
+          {
+            "id": "frontend.main",
+            "name": "main",
+            "kind": "module",
+            "language": "jsx",
+            "loc": 11,
+            "file": "frontend/src/main.jsx"
+          },
+          {
+            "id": "frontend.App",
+            "name": "App",
+            "kind": "module",
+            "language": "jsx",
+            "loc": 128,
+            "file": "frontend/src/App.jsx"
+          },
+          {
+            "id": "frontend.OrderList",
+            "name": "OrderList",
+            "kind": "module",
+            "language": "jsx",
+            "loc": 17,
+            "file": "frontend/src/components/OrderList.jsx"
+          },
+          {
+            "id": "frontend.OrderForm",
+            "name": "OrderForm",
+            "kind": "module",
+            "language": "jsx",
+            "loc": 83,
+            "file": "frontend/src/components/OrderForm.jsx"
+          },
+          {
+            "id": "frontend.useOrderStream",
+            "name": "useOrderStream",
+            "kind": "module",
+            "language": "js",
+            "loc": 27,
+            "file": "frontend/src/hooks/useOrderStream.js"
+          },
+          {
+            "id": "frontend.ordersApi",
+            "name": "ordersApi",
+            "kind": "module",
+            "language": "js",
+            "loc": 36,
+            "file": "frontend/src/api/ordersApi.js"
+          }
+        ]
+      },
+      {
+        "id": "dom:data",
+        "name": "Data stores",
+        "kind": "domain",
+        "children": [
+          {
+            "id": "ds:orders-topic",
+            "name": "orders (Kafka topic)",
+            "kind": "datastore"
+          },
+          {
+            "id": "ds:order-collection",
+            "name": "order (Mongo collection)",
+            "kind": "datastore"
+          },
+          {
+            "id": "ds:product-collection",
+            "name": "product (Mongo collection)",
+            "kind": "datastore"
+          },
+          {
+            "id": "ds:shipment-collection",
+            "name": "shipment (Mongo collection)",
+            "kind": "datastore"
+          }
+        ]
+      }
+    ]
+  },
+  "edges": [
+    {
+      "source": "order-service.OrderController",
+      "target": "order-service.OrderService",
+      "kind": "call"
+    },
+    {
+      "source": "order-service.OrderService",
+      "target": "order-service.OrderRepository",
+      "kind": "call"
+    },
+    {
+      "source": "order-service.OrderService",
+      "target": "order-service.OrderProducer",
+      "kind": "call"
+    },
+    {
+      "source": "order-service.OrderConsumer",
+      "target": "order-service.OrderRepository",
+      "kind": "call"
+    },
+    {
+      "source": "order-service.OrderConsumer",
+      "target": "order-service.OrderProducer",
+      "kind": "call"
+    },
+    {
+      "source": "order-service-vt.OrderController",
+      "target": "order-service-vt.OrderService",
+      "kind": "call"
+    },
+    {
+      "source": "order-service-vt.OrderConsumer",
+      "target": "order-service-vt.OrderRepository",
+      "kind": "call"
+    },
+    {
+      "source": "order-service-vt.OrderConsumer",
+      "target": "order-service-vt.OrderProducer",
+      "kind": "call"
+    },
+    {
+      "source": "order-service-vt.OrderService",
+      "target": "order-service-vt.OrderRepository",
+      "kind": "call"
+    },
+    {
+      "source": "order-service-vt.OrderService",
+      "target": "order-service-vt.OrderProducer",
+      "kind": "call"
+    },
+    {
+      "source": "inventory-service.ProductController",
+      "target": "inventory-service.ProductService",
+      "kind": "call"
+    },
+    {
+      "source": "inventory-service.ProductService",
+      "target": "inventory-service.ProductRepository",
+      "kind": "call"
+    },
+    {
+      "source": "inventory-service.OrderConsumer",
+      "target": "inventory-service.ProductService",
+      "kind": "call"
+    },
+    {
+      "source": "inventory-service.OrderConsumer",
+      "target": "inventory-service.OrderProducer",
+      "kind": "call"
+    },
+    {
+      "source": "shipping-service.ShippingService",
+      "target": "shipping-service.ShipmentRepository",
+      "kind": "call"
+    },
+    {
+      "source": "shipping-service.OrderConsumer",
+      "target": "shipping-service.ShippingService",
+      "kind": "call"
+    },
+    {
+      "source": "shipping-service.OrderConsumer",
+      "target": "shipping-service.OrderProducer",
+      "kind": "call"
+    },
+    {
+      "source": "ds:orders-topic",
+      "target": "order-service.OrderConsumer",
+      "kind": "dispatch"
+    },
+    {
+      "source": "order-service.OrderProducer",
+      "target": "ds:orders-topic",
+      "kind": "write"
+    },
+    {
+      "source": "ds:orders-topic",
+      "target": "order-service-vt.OrderConsumer",
+      "kind": "dispatch"
+    },
+    {
+      "source": "order-service-vt.OrderProducer",
+      "target": "ds:orders-topic",
+      "kind": "write"
+    },
+    {
+      "source": "ds:orders-topic",
+      "target": "inventory-service.OrderConsumer",
+      "kind": "dispatch"
+    },
+    {
+      "source": "inventory-service.OrderProducer",
+      "target": "ds:orders-topic",
+      "kind": "write"
+    },
+    {
+      "source": "ds:orders-topic",
+      "target": "shipping-service.OrderConsumer",
+      "kind": "dispatch"
+    },
+    {
+      "source": "shipping-service.OrderProducer",
+      "target": "ds:orders-topic",
+      "kind": "write"
+    },
+    {
+      "source": "order-service.OrderRepository",
+      "target": "ds:order-collection",
+      "kind": "read"
+    },
+    {
+      "source": "order-service.OrderRepository",
+      "target": "ds:order-collection",
+      "kind": "write"
+    },
+    {
+      "source": "order-service-vt.OrderRepository",
+      "target": "ds:order-collection",
+      "kind": "read"
+    },
+    {
+      "source": "order-service-vt.OrderRepository",
+      "target": "ds:order-collection",
+      "kind": "write"
+    },
+    {
+      "source": "inventory-service.ProductRepository",
+      "target": "ds:product-collection",
+      "kind": "read"
+    },
+    {
+      "source": "inventory-service.ProductRepository",
+      "target": "ds:product-collection",
+      "kind": "write"
+    },
+    {
+      "source": "shipping-service.ShipmentRepository",
+      "target": "ds:shipment-collection",
+      "kind": "read"
+    },
+    {
+      "source": "shipping-service.ShipmentRepository",
+      "target": "ds:shipment-collection",
+      "kind": "write"
+    },
+    {
+      "source": "frontend.useOrderStream",
+      "target": "order-service.OrderController",
+      "kind": "call"
+    },
+    {
+      "source": "frontend.ordersApi",
+      "target": "order-service.OrderController",
+      "kind": "call"
+    },
+    {
+      "source": "frontend.ordersApi",
+      "target": "inventory-service.ProductController",
+      "kind": "call"
+    },
+    {
+      "source": "frontend.App",
+      "target": "frontend.OrderForm",
+      "kind": "call"
+    },
+    {
+      "source": "frontend.App",
+      "target": "frontend.OrderList",
+      "kind": "call"
+    },
+    {
+      "source": "frontend.App",
+      "target": "frontend.useOrderStream",
+      "kind": "call"
+    },
+    {
+      "source": "frontend.App",
+      "target": "frontend.ordersApi",
+      "kind": "call"
+    },
+    {
+      "source": "frontend.main",
+      "target": "frontend.App",
+      "kind": "call"
+    }
+  ],
+  "entryPoints": [
+    "frontend.main",
+    "inventory-service.AsyncApplication",
+    "inventory-service.OrderConsumer",
+    "inventory-service.ProductController",
+    "order-service-vt.OrderConsumer",
+    "order-service-vt.OrderController",
+    "order-service-vt.VirtualThreadOrderApplication",
+    "order-service.AsyncApplication",
+    "order-service.ExceptionController",
+    "order-service.OrderConsumer",
+    "order-service.OrderController",
+    "shipping-service.AsyncApplication",
+    "shipping-service.OrderConsumer"
+  ],
+  "deadEnds": [],
+  "observations": [
+    "order-service.ExceptionController is a @ControllerAdvice \u2014 Spring dispatches to it on any unhandled exception from a controller in the same service. No static call edge exists; treated as an entry point rather than a dead end for that reason.",
+    "order-service-vt.VirtualThreadOrderApplication is a @ControllerAdvice \u2014 Spring dispatches to it on any unhandled exception from a controller in the same service. No static call edge exists; treated as an entry point rather than a dead end for that reason.",
+    "inventory-service.AsyncApplication is a @ControllerAdvice \u2014 Spring dispatches to it on any unhandled exception from a controller in the same service. No static call edge exists; treated as an entry point rather than a dead end for that reason.",
+    "order-service and order-service-vt bind the SAME Kafka topic ('orders') and the SAME Mongo 'order' collection under different consumer group IDs ('orders' vs 'orders-vt') \u2014 modeled here as edges into the identical ds:orders-topic / ds:order-collection nodes. They are deploy-time mutually exclusive (Helm chart enforces this), but nothing at the code or infra level stops both running at once in an ad hoc local setup, which would double-process every order.",
+    "The 'orders' Kafka topic is a single point of failure and single point of coupling for the whole saga: all four consumer/producer pairs across every service read and write the same topic with no per-stage partitioning or routing key, visible in the map as one datastore node with the highest edge count by far.",
+    "inventory-service publishes INVENTORY_FAILURE and INVENTORY_REVERT_FAILURE onto the orders topic, but no consumer in the graph has an inbound dispatch edge from those specific statuses \u2014 order-service's consumer only branches on INITIATION_SUCCESS, INVENTORY_SUCCESS, and SHIPPING_FAILURE. This isn't a topology extraction gap; it's a genuine missing edge in the saga's own state machine (see ASSESSMENT.md Technical Debt #3) and is surfaced explicitly in the 'stalled order' persona flow below.",
+    "shipping-service has no @RestController and therefore no HTTP entry point at all \u2014 its only entry point is the Kafka dispatch edge from ds:orders-topic. A grep-only/HTTP-only topology extraction would have marked all of shipping-service's classes as dead code; they are not.",
+    "frontend hardcodes 'localhost:8080'/'localhost:8081' as call targets rather than resolving them through any config/env layer, so the frontend->controller edges in this map are accurate for local dev but do not hold in the Helm/k8s deployment this same repo ships (ASSESSMENT.md Technical Debt #4).",
+    "Domain/DTO classes (Order, Product, Shipment, LineItem, Address, OrderStatus, the two ObjectId serializers) were deliberately excluded as graph nodes \u2014 every module in every service references them, so including them would turn the map into a hairball without adding topology information. Their duplication across services is already documented in ASSESSMENT.md and CLAUDE.md."
+  ],
+  "flows": [
+    {
+      "name": "Customer places an order and it ships",
+      "persona": "Customer",
+      "description": "A customer submits an order through the storefront, stock is reserved, and a shipment is created \u2014 the saga's happy path.",
+      "steps": [
+        {
+          "label": "Customer submits the order form",
+          "nodes": [
+            "frontend.OrderForm",
+            "frontend.ordersApi"
+          ]
+        },
+        {
+          "label": "Order service saves the order and announces it",
+          "nodes": [
+            "order-service.OrderController",
+            "order-service.OrderService",
+            "order-service.OrderRepository",
+            "ds:order-collection",
+            "order-service.OrderProducer",
+            "ds:orders-topic"
+          ]
+        },
+        {
+          "label": "Inventory service reserves stock for the order",
+          "nodes": [
+            "ds:orders-topic",
+            "inventory-service.OrderConsumer",
+            "inventory-service.ProductService",
+            "inventory-service.ProductRepository",
+            "ds:product-collection",
+            "inventory-service.OrderProducer"
+          ]
+        },
+        {
+          "label": "Order service tells shipping to prepare the parcel",
+          "nodes": [
+            "ds:orders-topic",
+            "order-service.OrderConsumer",
+            "order-service.OrderProducer"
+          ]
+        },
+        {
+          "label": "Shipping service creates the shipment record",
+          "nodes": [
+            "ds:orders-topic",
+            "shipping-service.OrderConsumer",
+            "shipping-service.ShippingService",
+            "shipping-service.ShipmentRepository",
+            "ds:shipment-collection"
+          ]
+        },
+        {
+          "label": "Customer watches order status update live",
+          "nodes": [
+            "frontend.useOrderStream",
+            "order-service.OrderController"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Order placed outside shipping hours triggers a stock rollback",
+      "persona": "Customer",
+      "description": "A customer orders after 18:00; shipping refuses the order and the saga automatically gives the reserved stock back.",
+      "steps": [
+        {
+          "label": "Order and inventory reservation succeed as normal",
+          "nodes": [
+            "order-service.OrderController",
+            "ds:orders-topic",
+            "inventory-service.OrderConsumer",
+            "inventory-service.ProductService"
+          ]
+        },
+        {
+          "label": "Shipping rejects the order \u2014 outside the 10:00\u201318:00 acceptance window",
+          "nodes": [
+            "ds:orders-topic",
+            "shipping-service.OrderConsumer",
+            "shipping-service.ShippingService",
+            "shipping-service.OrderProducer"
+          ]
+        },
+        {
+          "label": "Order service sees SHIPPING_FAILURE and asks inventory to revert",
+          "nodes": [
+            "ds:orders-topic",
+            "order-service.OrderConsumer",
+            "order-service.OrderProducer"
+          ]
+        },
+        {
+          "label": "Inventory service restores the stock it had reserved",
+          "nodes": [
+            "ds:orders-topic",
+            "inventory-service.OrderConsumer",
+            "inventory-service.ProductService",
+            "ds:product-collection"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Customer's order silently stalls when stock is insufficient",
+      "persona": "Customer",
+      "description": "A customer orders more of a product than is in stock; inventory correctly refuses the reservation, but nothing downstream ever tells the customer or retries \u2014 the order just stops.",
+      "steps": [
+        {
+          "label": "Order is accepted and announced",
+          "nodes": [
+            "order-service.OrderController",
+            "ds:orders-topic"
+          ]
+        },
+        {
+          "label": "Inventory service checks stock and finds it insufficient",
+          "nodes": [
+            "ds:orders-topic",
+            "inventory-service.OrderConsumer",
+            "inventory-service.ProductService",
+            "ds:product-collection"
+          ]
+        },
+        {
+          "label": "Inventory publishes INVENTORY_FAILURE onto the shared topic",
+          "nodes": [
+            "inventory-service.OrderProducer",
+            "ds:orders-topic"
+          ]
+        },
+        {
+          "label": "No consumer in the system is listening for INVENTORY_FAILURE \u2014 the order status never advances again",
+          "nodes": [
+            "ds:orders-topic"
+          ]
+        }
+      ]
+    }
+  ]
+}

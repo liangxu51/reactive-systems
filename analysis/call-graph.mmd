@@ -1,0 +1,92 @@
+graph TD
+  subgraph dom_order["Order Orchestration (reactive)"]
+    OC["OrderController (entry)"]
+    OS[OrderService]
+    OCons["OrderConsumer (entry)"]
+    OProd[OrderProducer]
+    ORepo[OrderRepository]
+    OMain["AsyncApplication (entry)"]
+    OExc["ExceptionController (entry)"]
+  end
+
+  subgraph dom_ordervt["Order Orchestration (virtual-thread variant)"]
+    VOC["OrderController (entry)"]
+    VOS[OrderService]
+    VOCons["OrderConsumer (entry)"]
+    VOProd[OrderProducer]
+    VORepo[OrderRepository]
+    VMain["VirtualThreadOrderApplication (entry)"]
+  end
+
+  subgraph dom_inv["Inventory / Stock Reservation"]
+    PC["ProductController (entry)"]
+    PS[ProductService]
+    ICons["OrderConsumer (entry)"]
+    IProd[OrderProducer]
+    PRepo[ProductRepository]
+    IMain["AsyncApplication (entry)"]
+  end
+
+  subgraph dom_ship["Shipping / Fulfillment"]
+    SS[ShippingService]
+    SCons["OrderConsumer (entry)"]
+    SProd[OrderProducer]
+    SRepo[ShipmentRepository]
+    SMain["AsyncApplication (entry)"]
+  end
+
+  subgraph dom_fe["Frontend"]
+    FEMain["main.jsx (entry)"]
+    FEApp[App.jsx]
+    FEForm[OrderForm]
+    FEList[OrderList]
+    FEHook[useOrderStream]
+    FEApi[ordersApi]
+  end
+
+  subgraph dom_data["Data stores"]
+    K((orders topic))
+    MO[(order collection)]
+    MP[(product collection)]
+    MS[(shipment collection)]
+  end
+
+  FEMain --> FEApp
+  FEApp --> FEForm
+  FEApp --> FEList
+  FEApp --> FEHook
+  FEApp --> FEApi
+  FEApi -->|POST/GET :8080| OC
+  FEApi -->|GET :8081| PC
+  FEHook -->|SSE :8080| OC
+
+  OC --> OS
+  OS --> ORepo
+  ORepo -->|read/write| MO
+  OS --> OProd
+  OProd -->|write| K
+  K -->|dispatch| OCons
+  OCons --> OProd
+
+  VOC --> VOS
+  VOS --> VORepo
+  VORepo -->|read/write| MO
+  VOS --> VOProd
+  VOProd -->|write| K
+  K -->|dispatch| VOCons
+  VOCons --> VOProd
+
+  K -->|dispatch| ICons
+  ICons --> PS
+  PS --> PRepo
+  PRepo -->|read/write| MP
+  PS --> IProd
+  IProd -->|write| K
+  PC --> PS
+
+  K -->|dispatch| SCons
+  SCons --> SS
+  SS --> SRepo
+  SRepo -->|read/write| MS
+  SS --> SProd
+  SProd -->|write| K

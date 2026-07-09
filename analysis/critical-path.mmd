@@ -1,0 +1,14 @@
+flowchart TD
+  %% Primary flow: "Customer places an order and it ships" (see topology.json -> flows[0])
+  %% No production telemetry exists for this system (local/tutorial project, no APM) —
+  %% see ASSESSMENT.md Production Runtime Profile — so no p50/p99 annotations are included.
+
+  A["Customer submits the order form\n(OrderForm -> ordersApi.createOrder)"] --> B
+  B["order-service saves the order\nand publishes INITIATION_SUCCESS\n(OrderController -> OrderService -> OrderRepository -> order collection)"] --> C
+  C["order-service re-publishes RESERVE_INVENTORY\n(OrderConsumer -> OrderProducer -> orders topic)"] --> D
+  D["inventory-service reserves stock\n(OrderConsumer -> ProductService -> ProductRepository -> product collection)"] --> E
+  E["inventory-service publishes INVENTORY_SUCCESS\n(OrderProducer -> orders topic)"] --> F
+  F["order-service re-publishes PREPARE_SHIPPING\n(OrderConsumer -> OrderProducer -> orders topic)"] --> G
+  G["shipping-service creates the shipment record\n(OrderConsumer -> ShippingService -> ShipmentRepository -> shipment collection)"] --> H
+  H["shipping-service publishes SHIPPING_SUCCESS\n(OrderProducer -> orders topic)"] --> I
+  I["Customer sees the status update\nvia the live SSE stream\n(useOrderStream -> GET /api/orders)"]
