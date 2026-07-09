@@ -19,3 +19,7 @@ out/
 .settings/
 *.project
 *.classpath
+
+# gemini-cli settings written by the PR review workflow
+.gemini/
+gha-creds-*.json
