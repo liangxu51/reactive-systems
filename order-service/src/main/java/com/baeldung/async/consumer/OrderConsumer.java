@@ -50,10 +50,7 @@ public class OrderConsumer {
                     }
                     OrderStatus next = NEXT_STATUS.get(order.getOrderStatus());
                     if (next != null) {
-                        Order outbound = new Order();
-                        outbound.setId(saved.getId());
-                        outbound.setOrderStatus(next);
-                        orderProducer.sendMessage(outbound);
+                        orderProducer.sendMessage(saved.setOrderStatus(next));
                     }
                 },
                 err -> log.error("Failed to process order {} for status {}", order.getId(), order.getOrderStatus(), err));
