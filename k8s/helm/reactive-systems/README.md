@@ -105,13 +105,15 @@ db.product.insertMany([
   Kafka consumer/producer. Its Deployment intentionally has no Service,
   ports, or probes.
 
-## Known pre-existing bug hit during testing
+## Fixed: shipping-service Order.shippingDate bug
 
-Once an order reaches `PREPARE_SHIPPING`, `shipping-service` fails to
-publish `SHIPPING_SUCCESS`/`SHIPPING_FAILURE` back to Kafka:
-`InvalidDefinitionException: Java 8 date/time type 'java.time.LocalDate' not
-supported by default` when serializing `Order.shippingDate`. This is an
-application bug (the Kafka producer's Jackson `ObjectMapper` is missing the
-`jackson-datatype-jsr310` module) present in the `shipping-service` module
-itself, not something introduced by this chart — it would reproduce the
-same way under `docker-compose`.
+Previously, once an order reached `PREPARE_SHIPPING`, `shipping-service`
+could fail to publish `SHIPPING_SUCCESS`/`SHIPPING_FAILURE` back to Kafka
+with an `InvalidDefinitionException` on `Order.shippingDate`. The root
+cause turned out to be more than a missing Jackson module: `shipping-service`'s
+duplicated `Order.shippingDate` was typed `java.time.LocalDate` while
+`order-service`'s copy is `java.util.Date` — once a real value flowed
+through, the type mismatch broke deserialization on the `order-service`
+side and permanently wedged its Kafka consumer, not just this one order.
+Fixed in PR #12 by aligning both services' wire-facing type to `Date`.
+See `analysis/ASSESSMENT.md` Technical Debt #12 for the full writeup.
