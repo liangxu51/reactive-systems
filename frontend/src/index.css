@@ -63,12 +63,25 @@ body {
 .page-content {
   flex: 1;
   width: 100%;
-  max-width: 720px;
+  max-width: 1080px;
   margin: 0 auto;
   padding: 2rem 1.25rem 3rem;
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (max-width: 860px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
 }
 
 .card {
@@ -171,6 +184,23 @@ body {
   color: #fff;
 }
 
+.card-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.card-header-row .card-title {
+  margin: 0;
+}
+
+.orders-card .action-row {
+  flex-wrap: wrap;
+}
+
 .action-row {
   display: flex;
   gap: 0.85rem;
@@ -178,7 +208,7 @@ body {
 }
 
 .action-row .btn {
-  flex: 1 1 200px;
+  flex: 1 1 160px;
 }
 
 .btn-outline-action {
@@ -243,6 +273,9 @@ body {
 .order-id {
   font-weight: 600;
   font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .order-message {

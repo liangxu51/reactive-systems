@@ -5,12 +5,23 @@ function statusVariant(orderStatus) {
   return '';
 }
 
-export default function OrderList({ orders }) {
-  if (orders === null) return null;
+export default function OrderList({ orders, onGetPreviousOrders, onGetOrderStream }) {
   return (
-    <div className="card">
-      <h3 className="card-title">Your orders placed so far</h3>
-      {orders.length === 0 ? (
+    <div className="card orders-card">
+      <div className="card-header-row">
+        <h3 className="card-title">Order History</h3>
+        <div className="action-row">
+          <button className="btn btn-outline-action" onClick={onGetPreviousOrders}>
+            Get Previous Orders
+          </button>
+          <button className="btn btn-outline-action" onClick={onGetOrderStream}>
+            Get Previous Order Stream
+          </button>
+        </div>
+      </div>
+      {orders === null ? (
+        <p className="empty-state">Choose an option above to load your orders.</p>
+      ) : orders.length === 0 ? (
         <p className="empty-state">No orders yet.</p>
       ) : (
         <ul className="order-list">

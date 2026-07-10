@@ -104,27 +104,24 @@ export default function App() {
           <div className="alert-banner error">Your order could not be placed at the moment: {error.message}</div>
         )}
 
-        {orderForm !== null && (
-          <OrderForm
-            orderForm={orderForm}
-            paymentModes={paymentModes}
-            onPaymentModeChange={handlePaymentModeChange}
-            onLineItemQuantityChange={handleLineItemQuantityChange}
-            onAddressFieldChange={handleAddressFieldChange}
-            onSubmit={handleSubmit}
+        <div className="workspace">
+          {orderForm !== null && (
+            <OrderForm
+              orderForm={orderForm}
+              paymentModes={paymentModes}
+              onPaymentModeChange={handlePaymentModeChange}
+              onLineItemQuantityChange={handleLineItemQuantityChange}
+              onAddressFieldChange={handleAddressFieldChange}
+              onSubmit={handleSubmit}
+            />
+          )}
+
+          <OrderList
+            orders={previousOrders}
+            onGetPreviousOrders={handleGetPreviousOrders}
+            onGetOrderStream={handleGetOrderStream}
           />
-        )}
-
-        <div className="action-row">
-          <button className="btn btn-outline-action" onClick={handleGetPreviousOrders}>
-            Get Previous Orders
-          </button>
-          <button className="btn btn-outline-action" onClick={handleGetOrderStream}>
-            Get Previous Order Stream
-          </button>
         </div>
-
-        <OrderList orders={previousOrders} />
       </main>
     </div>
   );
