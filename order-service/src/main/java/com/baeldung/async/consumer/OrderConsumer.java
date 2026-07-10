@@ -1,6 +1,7 @@
 package com.baeldung.async.consumer;
 
 import java.util.Map;
+import java.util.Set;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -22,6 +23,12 @@ public class OrderConsumer {
         OrderStatus.INVENTORY_SUCCESS, OrderStatus.PREPARE_SHIPPING,
         OrderStatus.SHIPPING_FAILURE, OrderStatus.REVERT_INVENTORY);
 
+    // Terminal saga failures with no further compensating transaction: the order
+    // stays failed and nothing else in the saga will act on it, so they must be
+    // logged at ERROR or they vanish silently (see ASSESSMENT.md tech debt #3).
+    private static final Set<OrderStatus> UNRECOVERABLE_STATUSES = Set.of(
+        OrderStatus.INVENTORY_FAILURE, OrderStatus.INVENTORY_REVERT_FAILURE);
+
     @Autowired
     private OrderRepository orderRepository;
 
@@ -37,6 +44,10 @@ public class OrderConsumer {
             .flatMap(orderRepository::save)
             .subscribe(
                 saved -> {
+                    if (UNRECOVERABLE_STATUSES.contains(order.getOrderStatus())) {
+                        log.error("Order {} reached unrecoverable status {} with no compensating action: {}",
+                            order.getId(), order.getOrderStatus(), order.getResponseMessage());
+                    }
                     OrderStatus next = NEXT_STATUS.get(order.getOrderStatus());
                     if (next != null) {
                         Order outbound = new Order();
