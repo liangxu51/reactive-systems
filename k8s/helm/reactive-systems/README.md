@@ -53,18 +53,20 @@ helm install reactive-systems k8s/helm/reactive-systems \
 
 ## 3. Reach the app
 
-The frontend is hardcoded to call `http://localhost:8080/api/orders`, so
-`order-service` needs to land on `localhost:8080` same as with
-docker-compose:
-
-```bash
-kubectl port-forward svc/order-service 8080:8080 -n reactive-systems
-```
-
-Then open the UI:
+The frontend calls `order-service`/`inventory-service` through relative
+`/api/...` paths, which nginx proxies in-cluster to the `order-service` and
+`inventory-service` Services - no port-forwarding needed. Just open the UI:
 
 ```bash
 minikube service frontend -n reactive-systems
+```
+
+If nginx logs `502` on `/api/orders` or `/api/products`, your cluster's
+CoreDNS ClusterIP likely differs from the default this chart assumes
+(`frontend.dnsResolverIP`, see `values.yaml`) - override it with:
+
+```bash
+--set frontend.dnsResolverIP=$(kubectl get svc kube-dns -n kube-system -o jsonpath='{.spec.clusterIP}')
 ```
 
 ## Seed product data

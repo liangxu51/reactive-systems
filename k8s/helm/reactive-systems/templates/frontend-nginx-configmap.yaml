@@ -1,0 +1,56 @@
+# Overrides the nginx.conf baked into the frontend image (frontend/nginx.conf)
+# so its /api/orders and /api/products proxy_pass calls resolve via the
+# cluster's DNS server instead of Docker's fixed 127.0.0.11 embedded DNS,
+# which only exists under docker-compose. Keep the proxy locations below in
+# sync with frontend/nginx.conf if either changes (see ASSESSMENT.md tech
+# debt #4).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-nginx-conf
+  labels:
+    app: frontend
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+data:
+  nginx.conf: |
+    worker_processes  1;
+
+    events {
+        worker_connections  1024;
+    }
+
+    http {
+        server {
+            listen 80;
+            server_name  localhost;
+
+            root   /usr/share/nginx/html;
+            index  index.html index.htm;
+            include /etc/nginx/mime.types;
+
+            gzip on;
+            gzip_min_length 1000;
+            gzip_proxied expired no-cache no-store private auth;
+            gzip_types text/plain text/css application/json application/javascript application/x-javascript text/xml application/xml application/xml+rss text/javascript;
+
+            location / {
+                try_files $uri $uri/ /index.html;
+            }
+
+            resolver {{ .Values.frontend.dnsResolverIP }} valid=10s;
+
+            location /api/orders {
+                set $order_service order-service;
+                proxy_pass http://$order_service:{{ .Values.orderService.servicePort }}/api/orders;
+                proxy_http_version 1.1;
+                proxy_set_header Connection '';
+                proxy_buffering off;
+                proxy_read_timeout 1h;
+            }
+
+            location /api/products {
+                set $inventory_service inventory-service;
+                proxy_pass http://$inventory_service:{{ .Values.inventoryService.servicePort }}/api/products;
+            }
+        }
+    }
