@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.Date;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -56,7 +57,8 @@ class ShippingServiceUnitTest {
         StepVerifier.create(shippingService.handleOrder(order))
             .assertNext(result -> {
                 assertThat(result.getOrderStatus()).isEqualTo(OrderStatus.SUCCESS);
-                assertThat(result.getShippingDate()).isEqualTo(today.plusDays(1));
+                assertThat(result.getShippingDate())
+                    .isEqualTo(Date.from(today.plusDays(1).atStartOfDay(ZONE).toInstant()));
             })
             .verifyComplete();
     }
