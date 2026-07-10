@@ -77,3 +77,10 @@ frontend:
   service:
     # NodePort so `minikube service frontend` can open it from the host.
     type: NodePort
+  # ClusterIP of the in-cluster DNS server, used by nginx to resolve
+  # order-service/inventory-service when proxying /api/* (see
+  # templates/frontend-nginx-configmap.yaml). 10.96.0.10 is CoreDNS's address
+  # on a stock minikube install (kubeadm's default 10.96.0.0/12 service CIDR).
+  # If your cluster differs, override with:
+  #   --set frontend.dnsResolverIP=$(kubectl get svc kube-dns -n kube-system -o jsonpath='{.spec.clusterIP}')
+  dnsResolverIP: "10.96.0.10"

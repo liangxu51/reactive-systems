@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 
-const ORDERS_STREAM_URL = 'http://localhost:8080/api/orders';
+// See ordersApi.js - relative path, proxied by nginx/Vite dev server.
+const ORDERS_STREAM_URL = '/api/orders';
 
 export function useOrderStream(active, onOrders) {
   useEffect(() => {
