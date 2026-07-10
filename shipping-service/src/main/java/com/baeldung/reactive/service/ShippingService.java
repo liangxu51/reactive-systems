@@ -3,6 +3,7 @@ package com.baeldung.reactive.service;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.Date;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -41,7 +42,7 @@ public class ShippingService {
                     return Mono.error(new RuntimeException("The current time is off the limits to place order."));
                 }
             })
-            .map(s -> order.setShippingDate(s.getShippingDate())
+            .map(s -> order.setShippingDate(Date.from(s.getShippingDate().atStartOfDay(clock.getZone()).toInstant()))
                 .setOrderStatus(OrderStatus.SUCCESS));
     }
 
