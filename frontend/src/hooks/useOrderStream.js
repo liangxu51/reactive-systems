@@ -16,11 +16,15 @@ export function useOrderStream(active, onOrders) {
     };
 
     eventSource.onerror = () => {
-      if (eventSource.readyState === EventSource.CLOSED) {
-        eventSource.close();
-      } else {
+      // GET /api/orders returns a finite snapshot Flux that completes and closes
+      // the connection once every order has been sent. EventSource can't tell that
+      // apart from a dropped connection - it fires onerror with readyState still
+      // CONNECTING (not CLOSED) and retries forever unless we close it ourselves.
+      // Only treat it as a genuine failure if we never got any data.
+      if (orders.length === 0) {
         console.error('EventSource error while streaming orders');
       }
+      eventSource.close();
     };
 
     return () => eventSource.close();
