@@ -88,41 +88,41 @@ export default function App() {
   }
 
   return (
-    <>
-      <div className="container">
-        <h2>Please place a new Order!</h2>
-      </div>
-      {response !== null && (
-        <div className="container">
-          <h3>Your order {response.id} was successfully placed, please check the status of order.</h3>
+    <div className="page">
+      <header className="page-header">
+        <h1>Reactive Order Demo</h1>
+        <p>Place an order and watch it flow through the reactive saga.</p>
+      </header>
+
+      <main className="page-content">
+        {response !== null && (
+          <div className="alert-banner success">
+            Your order {response.id} was successfully placed. Check the order status below.
+          </div>
+        )}
+        {error !== null && (
+          <div className="alert-banner error">Your order could not be placed at the moment: {error.message}</div>
+        )}
+
+        <div className="workspace">
+          {orderForm !== null && (
+            <OrderForm
+              orderForm={orderForm}
+              paymentModes={paymentModes}
+              onPaymentModeChange={handlePaymentModeChange}
+              onLineItemQuantityChange={handleLineItemQuantityChange}
+              onAddressFieldChange={handleAddressFieldChange}
+              onSubmit={handleSubmit}
+            />
+          )}
+
+          <OrderList
+            orders={previousOrders}
+            onGetPreviousOrders={handleGetPreviousOrders}
+            onGetOrderStream={handleGetOrderStream}
+          />
         </div>
-      )}
-      {error !== null && (
-        <div className="container">
-          <h3>Your order could not be placed at the moment: {error.message}</h3>
-        </div>
-      )}
-      {orderForm !== null && (
-        <OrderForm
-          orderForm={orderForm}
-          paymentModes={paymentModes}
-          onPaymentModeChange={handlePaymentModeChange}
-          onLineItemQuantityChange={handleLineItemQuantityChange}
-          onAddressFieldChange={handleAddressFieldChange}
-          onSubmit={handleSubmit}
-        />
-      )}
-      <div className="container">
-        <button className="btn btn-danger btn-block btn-lg" onClick={handleGetPreviousOrders}>
-          Get Previous Orders
-        </button>
-      </div>
-      <div className="container">
-        <button className="btn btn-danger btn-block btn-lg" onClick={handleGetOrderStream}>
-          Get Previous Order Stream
-        </button>
-      </div>
-      <OrderList orders={previousOrders} />
-    </>
+      </main>
+    </div>
   );
 }

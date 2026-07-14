@@ -7,76 +7,83 @@ export default function OrderForm({
   onSubmit,
 }) {
   return (
-    <div className="container">
+    <div className="card">
       <form onSubmit={onSubmit}>
-        <h3 className="container">Product Quantities:</h3>
-        {orderForm.lineItems.map((item) => (
-          <div className="container" key={item.productId}>
-            <li className="form-group input-group-lg">
-              {item.name}:{' '}
+        <h3 className="card-title">Product Quantities</h3>
+        <ul className="line-items">
+          {orderForm.lineItems.map((item) => (
+            <li className="line-item" key={item.productId}>
+              <div className="line-item-info">
+                <span className="line-item-name">{item.name}</span>
+                <span className="line-item-stock">Only {item.stock} left in stock</span>
+              </div>
               <input
+                className="form-control line-item-qty"
                 value={item.quantity}
                 placeholder="10"
                 onChange={(e) => onLineItemQuantityChange(item.productId, e.target.value)}
               />
-              <p>Only {item.stock} left in the stock!</p>
             </li>
+          ))}
+        </ul>
+
+        <div className="field-group">
+          <label className="field-label" htmlFor="paymentMode">
+            Payment Mode
+          </label>
+          <select
+            id="paymentMode"
+            className="form-control"
+            value={orderForm.paymentMode}
+            onChange={(e) => onPaymentModeChange(e.target.value)}
+          >
+            {paymentModes.map((mode) => (
+              <option key={mode} value={mode}>
+                {mode}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="field-group">
+          <label className="field-label">Shipping Address</label>
+          <div className="address-grid">
+            <input
+              className="form-control span-2"
+              placeholder="Name"
+              value={orderForm.shippingAddress.name}
+              onChange={(e) => onAddressFieldChange('name', e.target.value)}
+            />
+            <input
+              className="form-control"
+              placeholder="House"
+              value={orderForm.shippingAddress.house}
+              onChange={(e) => onAddressFieldChange('house', e.target.value)}
+            />
+            <input
+              className="form-control"
+              placeholder="Street"
+              value={orderForm.shippingAddress.street}
+              onChange={(e) => onAddressFieldChange('street', e.target.value)}
+            />
+            <input
+              className="form-control"
+              placeholder="City"
+              value={orderForm.shippingAddress.city}
+              onChange={(e) => onAddressFieldChange('city', e.target.value)}
+            />
+            <input
+              className="form-control"
+              placeholder="Zip"
+              value={orderForm.shippingAddress.zip}
+              onChange={(e) => onAddressFieldChange('zip', e.target.value)}
+            />
           </div>
-        ))}
-        <div className="container">
-          <h3>
-            Payment Mode:
-            <select
-              className="form-group input-group-lg"
-              value={orderForm.paymentMode}
-              onChange={(e) => onPaymentModeChange(e.target.value)}
-            >
-              {paymentModes.map((mode) => (
-                <option key={mode} value={mode}>
-                  {mode}
-                </option>
-              ))}
-            </select>
-          </h3>
         </div>
-        <div className="container">
-          <h3>Address:</h3>
-          <input
-            className="form-control"
-            placeholder="Name"
-            value={orderForm.shippingAddress.name}
-            onChange={(e) => onAddressFieldChange('name', e.target.value)}
-          />
-          <input
-            className="form-control"
-            placeholder="House"
-            value={orderForm.shippingAddress.house}
-            onChange={(e) => onAddressFieldChange('house', e.target.value)}
-          />
-          <input
-            className="form-control"
-            placeholder="Street"
-            value={orderForm.shippingAddress.street}
-            onChange={(e) => onAddressFieldChange('street', e.target.value)}
-          />
-          <input
-            className="form-control"
-            placeholder="City"
-            value={orderForm.shippingAddress.city}
-            onChange={(e) => onAddressFieldChange('city', e.target.value)}
-          />
-          <input
-            className="form-control"
-            placeholder="Zip"
-            value={orderForm.shippingAddress.zip}
-            onChange={(e) => onAddressFieldChange('zip', e.target.value)}
-          />
-        </div>
-        <div className="form-group">
-          <button className="btn btn-danger btn-block btn-lg" type="submit">
-            Place Order
-          </button>
-        </div>
+
+        <button className="btn btn-primary-solid btn-block btn-lg" type="submit">
+          Place Order
+        </button>
       </form>
     </div>
   );
