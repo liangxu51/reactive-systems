@@ -4,6 +4,8 @@ Deploys the same pipeline as `docker-compose.yml` (Zookeeper, Kafka, MongoDB,
 `order-service`, `inventory-service`, `shipping-service`, `frontend`) to a
 local minikube cluster.
 
+> ⚠️ **Demo only — not for production.** These services have no authentication or authorization; `GET /api/orders` exposes all order data (including customer PII) to any caller. Add auth and scope data access before any real deployment.
+
 ## 1. Point Docker at minikube and build the images
 
 No registry is used — images are built straight into minikube's own Docker
