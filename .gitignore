@@ -23,3 +23,6 @@ out/
 # gemini-cli settings written by the PR review workflow
 .gemini/
 gha-creds-*.json
+
+# local output from the Playwright MCP server (console logs, page snapshots, screenshots)
+.playwright-mcp/
