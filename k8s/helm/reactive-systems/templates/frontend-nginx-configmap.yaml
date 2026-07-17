@@ -40,7 +40,11 @@ data:
             resolver {{ .Values.frontend.dnsResolverIP }} valid=10s;
 
             location /api/orders {
-                set $order_service order-service;
+                # FQDN required: nginx's resolver directive queries kube-dns
+                # directly and does not apply the pod's /etc/resolv.conf
+                # search domains the way glibc/musl does, so a bare
+                # short name like "order-service" gets SERVFAIL.
+                set $order_service order-service.{{ .Release.Namespace }}.svc.cluster.local;
                 proxy_pass http://$order_service:{{ .Values.orderService.servicePort }}/api/orders;
                 proxy_http_version 1.1;
                 proxy_set_header Connection '';
@@ -49,7 +53,7 @@ data:
             }
 
             location /api/products {
-                set $inventory_service inventory-service;
+                set $inventory_service inventory-service.{{ .Release.Namespace }}.svc.cluster.local;
                 proxy_pass http://$inventory_service:{{ .Values.inventoryService.servicePort }}/api/products;
             }
         }

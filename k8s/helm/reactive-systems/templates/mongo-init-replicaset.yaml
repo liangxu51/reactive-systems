@@ -27,6 +27,10 @@ spec:
                 if (rs.status().ok === 1) {
                   print('replica set already initiated');
                 } else {
-                  rs.initiate({_id: 'rs0', members: [{_id: 0, host: '{{ .Values.mongodb.serviceName }}:27017'}]});
+                  // Stable per-pod DNS name from the headless Service +
+                  // StatefulSet, NOT the Service name itself - see
+                  // mongodb.yaml for why this is the only self-resolvable,
+                  // restart-stable identity mongod can use.
+                  rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'mongo-db-0.{{ .Values.mongodb.serviceName }}.{{ .Release.Namespace }}.svc.cluster.local:27017'}]});
                 }
               "
