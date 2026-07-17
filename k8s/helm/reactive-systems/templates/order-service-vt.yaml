@@ -31,7 +31,7 @@ spec:
               done
       containers:
         - name: order-service-vt
-          image: "{{ .Values.orderServiceVt.image.repository }}:{{ .Values.orderServiceVt.image.tag }}"
+          image: "{{ .Values.orderServiceVt.image.repository }}:{{ .Values.orderServiceVt.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           ports:
             - containerPort: {{ .Values.orderServiceVt.containerPort }}

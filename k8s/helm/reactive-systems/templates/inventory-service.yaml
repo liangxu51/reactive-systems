@@ -27,7 +27,7 @@ spec:
               done
       containers:
         - name: inventory-service
-          image: "{{ .Values.inventoryService.image.repository }}:{{ .Values.inventoryService.image.tag }}"
+          image: "{{ .Values.inventoryService.image.repository }}:{{ .Values.inventoryService.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           ports:
             - containerPort: {{ .Values.inventoryService.containerPort }}

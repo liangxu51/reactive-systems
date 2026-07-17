@@ -1,11 +1,20 @@
 # Default values target a local minikube cluster.
-# Build the service images into minikube's own Docker daemon first:
+# Build the service images into minikube's own Docker daemon first, tagging
+# them with this chart's appVersion (see Chart.yaml) rather than "latest":
 #   eval $(minikube docker-env)
 #   mvn clean package -pl order-service,inventory-service,shipping-service
-#   docker build -t order-service:latest order-service
-#   docker build -t inventory-service:latest inventory-service
-#   docker build -t shipping-service:latest shipping-service
-#   (cd frontend && npm ci && npm run build) && docker build -t frontend:latest frontend
+#   TAG=$(grep '^appVersion' Chart.yaml | cut -d '"' -f2)
+#   docker build -t order-service:$TAG order-service
+#   docker build -t inventory-service:$TAG inventory-service
+#   docker build -t shipping-service:$TAG shipping-service
+#   (cd frontend && npm ci && npm run build) && docker build -t frontend:$TAG frontend
+#
+# imagePullPolicy stays IfNotPresent (no registry backs these images, so
+# Always would just fail trying to pull them) - bump appVersion in Chart.yaml
+# before each rebuild instead, so every image gets a unique tag and nodes
+# never serve a stale cached image. Per-service image.tag below defaults to
+# appVersion when left blank; override it (e.g. --set orderService.image.tag=foo)
+# for an ad hoc build without bumping the chart version.
 imagePullPolicy: IfNotPresent
 
 mongodb:
@@ -35,7 +44,7 @@ orderService:
   enabled: true
   image:
     repository: order-service
-    tag: latest
+    tag: ""
   containerPort: 8080
   servicePort: 8080
   replicaCount: 1
@@ -48,7 +57,7 @@ orderServiceVt:
   enabled: false
   image:
     repository: order-service-vt
-    tag: latest
+    tag: ""
   containerPort: 8083
   servicePort: 8080
   replicaCount: 1
@@ -56,7 +65,7 @@ orderServiceVt:
 inventoryService:
   image:
     repository: inventory-service
-    tag: latest
+    tag: ""
   containerPort: 8081
   servicePort: 8081
   replicaCount: 1
@@ -64,13 +73,13 @@ inventoryService:
 shippingService:
   image:
     repository: shipping-service
-    tag: latest
+    tag: ""
   replicaCount: 1
 
 frontend:
   image:
     repository: frontend
-    tag: latest
+    tag: ""
   containerPort: 80
   servicePort: 80
   replicaCount: 1
