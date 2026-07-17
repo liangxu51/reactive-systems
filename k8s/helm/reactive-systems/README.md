@@ -9,7 +9,11 @@ local minikube cluster.
 ## 1. Point Docker at minikube and build the images
 
 No registry is used — images are built straight into minikube's own Docker
-daemon and referenced with `imagePullPolicy: IfNotPresent`.
+daemon and referenced with `imagePullPolicy: IfNotPresent`. Because of that,
+tag every rebuild with this chart's `appVersion` (bump it in `Chart.yaml`
+first) rather than `latest` — with `IfNotPresent`, a node that already
+pulled `order-service:latest` once will keep serving that stale image
+forever, silently skipping any later rebuild under the same tag.
 
 ```bash
 minikube start
@@ -17,12 +21,14 @@ eval $(minikube docker-env)
 
 mvn clean package -pl order-service,inventory-service,shipping-service
 
-docker build -t order-service:latest order-service
-docker build -t inventory-service:latest inventory-service
-docker build -t shipping-service:latest shipping-service
+# Bump appVersion in k8s/helm/reactive-systems/Chart.yaml first, then:
+TAG=$(grep '^appVersion' k8s/helm/reactive-systems/Chart.yaml | cut -d '"' -f2)
+docker build -t order-service:$TAG order-service
+docker build -t inventory-service:$TAG inventory-service
+docker build -t shipping-service:$TAG shipping-service
 
 cd frontend && npm ci && npm run build && cd ..
-docker build -t frontend:latest frontend
+docker build -t frontend:$TAG frontend
 ```
 
 (On Node 17+, `npm run build` fails with `error:0308010C:digital envelope
@@ -32,7 +38,12 @@ needs OpenSSL's legacy provider: prefix the build with
 
 (To use the virtual-thread `order-service-vt` module instead, also run
 `mvn clean package -pl order-service-vt` and
-`docker build -t order-service-vt:latest order-service-vt`.)
+`docker build -t order-service-vt:$TAG order-service-vt`.)
+
+Each service's `image.tag` in `values.yaml` defaults to empty, which falls
+back to `Chart.yaml`'s `appVersion` at install/upgrade time. To rebuild just
+one service without bumping the chart version, override its tag directly,
+e.g. `--set orderService.image.tag=$(git rev-parse --short HEAD)`.
 
 ## 2. Install the chart
 

@@ -30,5 +30,5 @@ spec:
         # spring-boot-starter-webflux dependency, so it never opens an
         # HTTP port - it's purely a Kafka consumer/producer.
         - name: shipping-service
-          image: "{{ .Values.shippingService.image.repository }}:{{ .Values.shippingService.image.tag }}"
+          image: "{{ .Values.shippingService.image.repository }}:{{ .Values.shippingService.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.imagePullPolicy }}
