@@ -2,6 +2,8 @@
 
 This module contains services for article about reactive systems in Java. Please note that these services comprise parts of a full stack application to demonstrate the capabilities of a reactive system. Unless there is an article which extends on this concept, this is probably not a suitable module to add other code.
 
+> ⚠️ **Demo only — not for production.** These services have no authentication or authorization; `GET /api/orders` exposes all order data (including customer PII) to any caller. Add auth and scope data access before any real deployment.
+
 ## Local development
 
 Run infra (MongoDB + Kafka) in Docker and the service under active development on the host, for fast iteration with full debugger support:
