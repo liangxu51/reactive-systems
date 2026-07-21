@@ -1,18 +1,3 @@
-{{- if .Values.mongodb.persistence.enabled }}
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: mongo-db-data
-  labels:
-    {{- include "reactive-systems.labels" . | nindent 4 }}
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: {{ .Values.mongodb.persistence.size }}
----
-{{- end }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -22,7 +7,7 @@ metadata:
     {{- include "reactive-systems.labels" . | nindent 4 }}
 spec:
   serviceName: {{ .Values.mongodb.serviceName }}
-  replicas: 1
+  replicas: {{ .Values.mongodb.replicaCount }}
   selector:
     matchLabels:
       app: mongo-db
@@ -31,20 +16,34 @@ spec:
       labels:
         app: mongo-db
     spec:
+      # Soft (preferred) rather than required: this chart's default target is
+      # a single-node minikube cluster (see values.yaml header), where a hard
+      # anti-affinity rule would leave replicas 1 and 2 stuck Pending forever.
+      # On a multi-node cluster the scheduler will still spread members across
+      # nodes whenever it can.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: mongo-db
+                topologyKey: kubernetes.io/hostname
       containers:
         - name: mongo-db
           image: {{ .Values.mongodb.image }}
           # inventory-service uses reactive MongoDB transactions, which
           # only work against a replica set - see mongo-init-replicaset.yaml
-          # for the one-time rs.initiate() that turns this single node into
-          # a (single-member) replica set named rs0. The member host is the
-          # StatefulSet pod's stable per-pod DNS name (mongo-db-0.<headless
-          # service>...), not the Service name itself: a ClusterIP is a
-          # virtual address never bound to a real interface inside the pod
-          # (so mongod can never self-match against it), and a raw pod IP
-          # changes on every restart. The per-pod DNS name from the headless
-          # Service below is the only identity that is both self-resolvable
-          # and stable across restarts.
+          # for the one-time rs.initiate() that forms the {{ .Values.mongodb.replicaCount }}-member
+          # replica set named rs0. Each member host is that pod's stable
+          # per-pod DNS name (mongo-db-0.<headless service>...), not the
+          # Service name itself: a ClusterIP is a virtual address never bound
+          # to a real interface inside the pod (so mongod can never
+          # self-match against it), and a raw pod IP changes on every
+          # restart. The per-pod DNS name from the headless Service below is
+          # the only identity that is both self-resolvable and stable across
+          # restarts.
           command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
           ports:
             - containerPort: 27017
@@ -59,14 +58,25 @@ spec:
             tcpSocket:
               port: 27017
             initialDelaySeconds: 15
+      {{- if not .Values.mongodb.persistence.enabled }}
       volumes:
         - name: data
-          {{- if .Values.mongodb.persistence.enabled }}
-          persistentVolumeClaim:
-            claimName: mongo-db-data
-          {{- else }}
           emptyDir: {}
-          {{- end }}
+      {{- end }}
+  {{- if .Values.mongodb.persistence.enabled }}
+  # volumeClaimTemplates (not a single shared PVC) - with replicaCount > 1
+  # each mongod needs its own independent volume; sharing one PVC across
+  # replicas would point every member at the same on-disk data files.
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ .Values.mongodb.persistence.size }}
+  {{- end }}
 ---
 apiVersion: v1
 kind: Service

@@ -20,17 +20,32 @@ spec:
             - sh
             - -c
             - |
-              until mongo --host {{ .Values.mongodb.serviceName }} --eval "print('ok')"; do
-                echo waiting for mongo-db; sleep 2;
+              # rs.initiate()'s quorum check requires every member listed in
+              # the config to respond, not just a majority - so unlike a
+              # single-member set, we must wait for ALL {{ .Values.mongodb.replicaCount }} pods to be
+              # reachable before calling it, not just member 0.
+              {{- range $i := until (int .Values.mongodb.replicaCount) }}
+              until mongo --host mongo-db-{{ $i }}.{{ $.Values.mongodb.serviceName }}.{{ $.Release.Namespace }}.svc.cluster.local --eval "print('ok')"; do
+                echo waiting for mongo-db-{{ $i }}; sleep 2;
               done
-              mongo --host {{ .Values.mongodb.serviceName }} --eval "
+              {{- end }}
+              mongo --host mongo-db-0.{{ .Values.mongodb.serviceName }}.{{ .Release.Namespace }}.svc.cluster.local --eval "
                 if (rs.status().ok === 1) {
                   print('replica set already initiated');
                 } else {
-                  // Stable per-pod DNS name from the headless Service +
-                  // StatefulSet, NOT the Service name itself - see
-                  // mongodb.yaml for why this is the only self-resolvable,
-                  // restart-stable identity mongod can use.
-                  rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'mongo-db-0.{{ .Values.mongodb.serviceName }}.{{ .Release.Namespace }}.svc.cluster.local:27017'}]});
+                  // One member per StatefulSet replica, addressed by its
+                  // stable per-pod DNS name (NOT the Service name itself -
+                  // see mongodb.yaml for why that's the only self-resolvable,
+                  // restart-stable identity mongod can use). With
+                  // {{ .Values.mongodb.replicaCount }} voting members the set has a real majority
+                  // and keeps serving reads/writes through the loss of any one pod.
+                  rs.initiate({
+                    _id: 'rs0',
+                    members: [
+                      {{- range $i := until (int .Values.mongodb.replicaCount) }}
+                      {_id: {{ $i }}, host: 'mongo-db-{{ $i }}.{{ $.Values.mongodb.serviceName }}.{{ $.Release.Namespace }}.svc.cluster.local:27017'}{{ if lt (add1 $i) (int $.Values.mongodb.replicaCount) }},{{ end }}
+                      {{- end }}
+                    ]
+                  });
                 }
               "
