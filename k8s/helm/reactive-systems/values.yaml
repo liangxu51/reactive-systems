@@ -22,6 +22,9 @@ mongodb:
   # Matches the hostname baked into application-docker.properties.
   serviceName: mongo-db
   port: 27017
+  # 3 voting members so the replica set has a real majority (2) and survives
+  # losing any one pod - see mongodb.yaml/mongo-init-replicaset.yaml.
+  replicaCount: 3
   persistence:
     enabled: true
     size: 1Gi
