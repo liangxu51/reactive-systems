@@ -28,6 +28,19 @@ mongodb:
   persistence:
     enabled: true
     size: 1Gi
+  # WiredTiger's default cache formula - max((RAM - 1GB) / 2, 256MB) - sizes
+  # off the node's total RAM, not this container's cgroup limit, so it can
+  # size itself larger than the limit below and get OOM-killed. Pin it
+  # explicitly instead, leaving headroom under memory.limits for connections,
+  # the OS page cache, etc.
+  wiredTigerCacheSizeGB: "0.25"
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
 
 zookeeper:
   image: confluentinc/cp-zookeeper:latest
