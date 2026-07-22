@@ -34,7 +34,7 @@ class OrderServiceIntegrationTest {
 
     @Container
     @ServiceConnection
-    static final MongoDBContainer MONGO_DB_CONTAINER = new MongoDBContainer("mongo:4.4");
+    static final MongoDBContainer MONGO_DB_CONTAINER = new MongoDBContainer("mongo:7.0");
 
     @DynamicPropertySource
     static void disableKafkaListenerAutoStart(DynamicPropertyRegistry registry) {

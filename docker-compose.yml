@@ -27,25 +27,28 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
   mongodb:
     container_name: mongo-db
-    image: mongo:4.4
+    # If ~/mongo still holds data files from a pre-existing 4.4 run, mongod
+    # will refuse to start - either wipe that directory or walk it through
+    # MongoDB's documented 4.4 -> 5.0 -> 6.0 -> 7.0 upgrade path first.
+    image: mongo:7.0
     command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     volumes:
       - ~/mongo:/data/db
     ports:
       - "27017:27017"
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongo --quiet
+      test: mongosh --quiet --eval 'db.runCommand("ping").ok'
       interval: 5s
       timeout: 5s
       retries: 10
   mongo-init-replicaset:
-    image: mongo:4.4
+    image: mongo:7.0
     depends_on:
       mongodb:
         condition: service_healthy
     restart: "no"
     command: >
-      mongo --host mongo-db --eval "
+      mongosh --host mongo-db --eval "
         if (rs.status().ok === 1) {
           print('replica set already initiated');
         } else {

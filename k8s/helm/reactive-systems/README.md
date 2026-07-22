@@ -89,7 +89,7 @@ CoreDNS ClusterIP likely differs from the default this chart assumes
 empty regardless of deployment platform. Seed it once after Mongo comes up:
 
 ```bash
-kubectl exec -n reactive-systems deploy/mongo-db -- mongo reactive-systems --eval '
+kubectl exec -n reactive-systems deploy/mongo-db -- mongosh reactive-systems --eval '
 db.product.insertMany([
   {_id: ObjectId("5edcbfd30717397ae8cfb7f0"), name: "Product A", price: NumberLong(12), stock: 100},
   {_id: ObjectId("5edcbfd30717397ae8cfb7f1"), name: "Product D", price: NumberLong(16), stock: 100}

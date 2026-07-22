@@ -25,11 +25,11 @@ spec:
               # single-member set, we must wait for ALL {{ .Values.mongodb.replicaCount }} pods to be
               # reachable before calling it, not just member 0.
               {{- range $i := until (int .Values.mongodb.replicaCount) }}
-              until mongo --host mongo-db-{{ $i }}.{{ $.Values.mongodb.serviceName }}.{{ $.Release.Namespace }}.svc.cluster.local --eval "print('ok')"; do
+              until mongosh --host mongo-db-{{ $i }}.{{ $.Values.mongodb.serviceName }}.{{ $.Release.Namespace }}.svc.cluster.local --eval "print('ok')"; do
                 echo waiting for mongo-db-{{ $i }}; sleep 2;
               done
               {{- end }}
-              mongo --host mongo-db-0.{{ .Values.mongodb.serviceName }}.{{ .Release.Namespace }}.svc.cluster.local --eval "
+              mongosh --host mongo-db-0.{{ .Values.mongodb.serviceName }}.{{ .Release.Namespace }}.svc.cluster.local --eval "
                 if (rs.status().ok === 1) {
                   print('replica set already initiated');
                 } else {

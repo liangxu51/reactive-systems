@@ -18,7 +18,16 @@
 imagePullPolicy: IfNotPresent
 
 mongodb:
-  image: mongo:4.4
+  # 4.4 is past MongoDB's official EOL (no more security patches) - 7.0 is
+  # the current target. This only upgrades a *fresh* deployment: mongod
+  # refuses to start against an existing 4.4 on-disk data directory unless
+  # you walk it through the documented one-major-version-at-a-time path
+  # (4.4 -> 5.0 -> 6.0 -> 7.0, running
+  # db.adminCommand({setFeatureCompatibilityVersion: "<x.y>"}) after each
+  # step) - see https://www.mongodb.com/docs/manual/release-notes/. For this
+  # chart's disposable minikube/dev volumes, wiping the PVC/emptyDir and
+  # reinstalling is simpler than migrating in place.
+  image: mongo:7.0
   # Matches the hostname baked into application-docker.properties.
   serviceName: mongo-db
   port: 27017
