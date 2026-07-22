@@ -33,6 +33,8 @@ spec:
         - name: order-service-vt
           image: "{{ .Values.orderServiceVt.image.repository }}:{{ .Values.orderServiceVt.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.imagePullPolicy }}
+          env:
+            {{- include "reactive-systems.mongoUriEnv" . | nindent 12 }}
           ports:
             - containerPort: {{ .Values.orderServiceVt.containerPort }}
           readinessProbe:

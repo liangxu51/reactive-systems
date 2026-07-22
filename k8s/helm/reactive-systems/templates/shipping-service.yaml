@@ -32,3 +32,5 @@ spec:
         - name: shipping-service
           image: "{{ .Values.shippingService.image.repository }}:{{ .Values.shippingService.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.imagePullPolicy }}
+          env:
+            {{- include "reactive-systems.mongoUriEnv" . | nindent 12 }}

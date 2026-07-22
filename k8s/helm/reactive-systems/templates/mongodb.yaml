@@ -30,21 +30,44 @@ spec:
                   matchLabels:
                     app: mongo-db
                 topologyKey: kubernetes.io/hostname
+      initContainers:
+        # mongod requires the keyfile to be readable only by its own owner
+        # (group/other bits must be unset) or it refuses to start. A Secret
+        # volume's mount permissions can't reliably guarantee that across
+        # container UIDs, so copy it into a plain emptyDir here and chmod it
+        # directly instead of mounting the Secret straight into mongod.
+        - name: fix-keyfile-perms
+          image: {{ .Values.mongodb.image }}
+          command:
+            - sh
+            - -c
+            - |
+              cp /keyfile-secret/keyfile /keyfile/mongo-keyfile
+              chmod 600 /keyfile/mongo-keyfile
+          volumeMounts:
+            - name: keyfile-secret
+              mountPath: /keyfile-secret
+              readOnly: true
+            - name: keyfile
+              mountPath: /keyfile
       containers:
         - name: mongo-db
           image: {{ .Values.mongodb.image }}
           # inventory-service uses reactive MongoDB transactions, which
-          # only work against a replica set - see mongo-init-replicaset.yaml
-          # for the one-time rs.initiate() that forms the {{ .Values.mongodb.replicaCount }}-member
-          # replica set named rs0. Each member host is that pod's stable
-          # per-pod DNS name (mongo-db-0.<headless service>...), not the
-          # Service name itself: a ClusterIP is a virtual address never bound
-          # to a real interface inside the pod (so mongod can never
-          # self-match against it), and a raw pod IP changes on every
-          # restart. The per-pod DNS name from the headless Service below is
-          # the only identity that is both self-resolvable and stable across
-          # restarts.
-          command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--wiredTigerCacheSizeGB", {{ .Values.mongodb.wiredTigerCacheSizeGB | quote }}]
+          # only work against a replica set - see the mongo-init sidecar
+          # below for the one-time rs.initiate() that forms the
+          # {{ .Values.mongodb.replicaCount }}-member replica set named rs0. Each member host is
+          # that pod's stable per-pod DNS name (mongo-db-0.<headless
+          # service>...), not the Service name itself: a ClusterIP is a
+          # virtual address never bound to a real interface inside the pod
+          # (so mongod can never self-match against it), and a raw pod IP
+          # changes on every restart. The per-pod DNS name from the headless
+          # Service below is the only identity that is both self-resolvable
+          # and stable across restarts.
+          #
+          # --keyFile enables both internal replica-set-member auth and
+          # client auth (--auth is implied) - see issue #33.
+          command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--wiredTigerCacheSizeGB", {{ .Values.mongodb.wiredTigerCacheSizeGB | quote }}, "--keyFile", "/keyfile/mongo-keyfile"]
           ports:
             - containerPort: 27017
           resources:
@@ -52,6 +75,9 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data/db
+            - name: keyfile
+              mountPath: /keyfile
+              readOnly: true
           readinessProbe:
             tcpSocket:
               port: 27017
@@ -60,8 +86,141 @@ spec:
             tcpSocket:
               port: 27017
             initialDelaySeconds: 15
-      {{- if not .Values.mongodb.persistence.enabled }}
+        # Bootstraps the replica set and the initial users. This has to run
+        # as a sidecar inside the mongo-db-0 pod (not a separate Job, as
+        # before #33) because MongoDB's localhost exception - the only way
+        # to run admin commands before any user exists - checks that the
+        # connection's source is literally localhost from mongod's own
+        # point of view. A Job in its own pod is a remote connection over
+        # the pod network and doesn't qualify; a sidecar sharing mongo-db-0's
+        # network namespace does. Pods 1/2 run this same container image but
+        # their copy is a no-op once it confirms it isn't mongo-db-0.
+        - name: mongo-init
+          image: {{ .Values.mongodb.image }}
+          env:
+            - name: ROOT_USERNAME
+              value: {{ .Values.mongodb.auth.rootUsername | quote }}
+            - name: ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mongo-credentials
+                  key: root-password
+            - name: APP_USERNAME
+              value: {{ .Values.mongodb.auth.appUsername | quote }}
+            - name: APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mongo-credentials
+                  key: app-password
+          command:
+            - sh
+            - -c
+            - |
+              if [ "$(hostname)" != "mongo-db-0" ]; then
+                echo "not mongo-db-0, nothing to bootstrap here"
+                sleep infinity
+              fi
+
+              until mongo --host localhost --quiet --eval "print('ok')" >/dev/null 2>&1; do
+                echo waiting for local mongod; sleep 2;
+              done
+
+              # rs.initiate()'s quorum check requires every member listed in
+              # the config to respond, not just a majority - so unlike a
+              # single-member set, we must wait for ALL {{ .Values.mongodb.replicaCount }} pods to be
+              # reachable before calling it, not just this one.
+              {{- range $i := until (int .Values.mongodb.replicaCount) }}
+              until mongo --host mongo-db-{{ $i }}.{{ $.Values.mongodb.serviceName }}.{{ $.Release.Namespace }}.svc.cluster.local --quiet --eval "print('ok')" >/dev/null 2>&1; do
+                echo waiting for mongo-db-{{ $i }}; sleep 2;
+              done
+              {{- end }}
+
+              # Once the root user exists, replSetGetStatus itself requires
+              # auth, so an unauthenticated rs.status() reliably comes back
+              # with codeName Unauthorized - that alone proves bootstrap
+              # already happened on some earlier run and there's nothing
+              # left to do. This matters on every restart of this pod, not
+              # just the first boot: mongo-db-0 rejoining an already-formed
+              # set is almost always a SECONDARY (another member took over
+              # primary while it was down), so it must not assume it will
+              # become primary again - that only happens once, right after
+              # this pod runs rs.initiate() itself below.
+              ALREADY_BOOTSTRAPPED=$(mongo --host localhost --quiet --eval "rs.status().codeName === 'Unauthorized'" 2>/dev/null | tail -1)
+              if [ "$ALREADY_BOOTSTRAPPED" = "true" ]; then
+                echo "replica set and users already bootstrapped on an earlier run"
+                sleep infinity
+              fi
+
+              mongo --host localhost --quiet --eval "
+                if (rs.status().ok === 1) {
+                  print('replica set already initiated');
+                } else {
+                  // One member per StatefulSet replica, addressed by its
+                  // stable per-pod DNS name (NOT the Service name itself -
+                  // see above for why that's the only self-resolvable,
+                  // restart-stable identity mongod can use). With
+                  // {{ .Values.mongodb.replicaCount }} voting members the set has a real majority
+                  // and keeps serving reads/writes through the loss of any one pod.
+                  rs.initiate({
+                    _id: 'rs0',
+                    members: [
+                      {{- range $i := until (int .Values.mongodb.replicaCount) }}
+                      {_id: {{ $i }}, host: 'mongo-db-{{ $i }}.{{ $.Values.mongodb.serviceName }}.{{ $.Release.Namespace }}.svc.cluster.local:27017'}{{ if lt (add1 $i) (int $.Values.mongodb.replicaCount) }},{{ end }}
+                      {{- end }}
+                    ]
+                  });
+                }
+              "
+
+              until mongo --host localhost --quiet --eval "db.isMaster().ismaster" 2>/dev/null | grep -q true; do
+                echo waiting to become primary; sleep 2;
+              done
+
+              # Still covered by the localhost exception at this point:
+              # nothing has authenticated yet and no user exists, so this
+              # unauthenticated connection is allowed to create exactly one
+              # user. The exception covers only that one privileged write,
+              # not the rest of the session - a second createUser call in
+              # the same script still gets "requires authentication" - so
+              # the root user is created via the exception here, then used
+              # to authenticate for creating the app user below.
+              mongo --host localhost --eval "
+                try {
+                  db.getSiblingDB('admin').createUser({
+                    user: '$ROOT_USERNAME',
+                    pwd: '$ROOT_PASSWORD',
+                    roles: [{role: 'root', db: 'admin'}]
+                  });
+                  print('root user created');
+                } catch (e) {
+                  print('root user bootstrap skipped (already provisioned): ' + e);
+                }
+              "
+
+              mongo --host localhost -u "$ROOT_USERNAME" -p "$ROOT_PASSWORD" --authenticationDatabase admin --eval "
+                try {
+                  db.getSiblingDB('admin').createUser({
+                    user: '$APP_USERNAME',
+                    pwd: '$APP_PASSWORD',
+                    roles: [{role: 'readWrite', db: 'reactive-systems'}]
+                  });
+                  print('app user created');
+                } catch (e) {
+                  print('app user bootstrap skipped (already provisioned): ' + e);
+                }
+              "
+
+              sleep infinity
       volumes:
+        - name: keyfile-secret
+          secret:
+            secretName: mongo-credentials
+            items:
+              - key: keyfile
+                path: keyfile
+        - name: keyfile
+          emptyDir: {}
+      {{- if not .Values.mongodb.persistence.enabled }}
         - name: data
           emptyDir: {}
       {{- end }}

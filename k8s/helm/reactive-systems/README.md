@@ -88,8 +88,13 @@ CoreDNS ClusterIP likely differs from the default this chart assumes
 (no `CommandLineRunner`/Mongo import is wired up), so `product` starts out
 empty regardless of deployment platform. Seed it once after Mongo comes up:
 
+Mongo requires auth now (see #33), so pull the app user's password out of the
+generated Secret first:
+
 ```bash
-kubectl exec -n reactive-systems deploy/mongo-db -- mongo reactive-systems --eval '
+APP_PASSWORD=$(kubectl get secret mongo-credentials -n reactive-systems -o jsonpath='{.data.app-password}' | base64 -d)
+
+kubectl exec -n reactive-systems mongo-db-0 -- mongo "mongodb://reactive-systems-app:${APP_PASSWORD}@localhost:27017/reactive-systems?authSource=admin" --eval '
 db.product.insertMany([
   {_id: ObjectId("5edcbfd30717397ae8cfb7f0"), name: "Product A", price: NumberLong(12), stock: 100},
   {_id: ObjectId("5edcbfd30717397ae8cfb7f1"), name: "Product D", price: NumberLong(16), stock: 100}
@@ -102,14 +107,28 @@ db.product.insertMany([
   match the hostnames already baked into each service's
   `application-docker.properties` (the `docker` Spring profile is what the
   Dockerfiles activate) — no code changes needed.
-- `mongo-db` runs as a single-node replica set (`rs0`), started via
-  `mongod --replSet rs0` and initiated by the `mongo-init-replicaset` Helm
-  hook Job. This is required because `inventory-service` uses reactive
-  MongoDB transactions, which MongoDB only allows on a replica set (a plain
-  standalone `mongod`, as in `docker-compose.yml`, fails these with
-  `Transaction numbers are only allowed on a replica set member or mongos`).
+- `mongo-db` runs as a 3-member replica set (`rs0`), started via
+  `mongod --replSet rs0` and initiated by the `mongo-init` sidecar container
+  in the `mongo-db-0` pod (see `mongodb.yaml`). This is required because
+  `inventory-service` uses reactive MongoDB transactions, which MongoDB only
+  allows on a replica set (a plain standalone `mongod`, as in
+  `docker-compose.yml`, fails these with `Transaction numbers are only
+  allowed on a replica set member or mongos`).
 - `mongo-db` uses a PersistentVolumeClaim (`mongodb.persistence` in
   `values.yaml`); disable it for an ephemeral `emptyDir` instead.
+- **Auth** (#33): `mongod` runs with `--keyFile` (internal replica-set auth)
+  and requires client auth. Credentials are generated once per release into
+  the `mongo-credentials` Secret - a `root` admin user and a shared
+  least-privilege `reactive-systems-app` user (`readWrite` on the
+  `reactive-systems` db only), both created by the `mongo-init` sidecar via
+  MongoDB's "localhost exception" the first time `mongo-db-0` comes up. The
+  three app services get the app user's password injected via
+  `SPRING_MONGODB_URI` (see `_helpers.tpl`/`mongo-secret.yaml`) rather than
+  it living in `application-docker.properties`. Retrieve the root password
+  with:
+  ```bash
+  kubectl get secret mongo-credentials -n reactive-systems -o jsonpath='{.data.root-password}' | base64 -d
+  ```
 - `order-service` and `order-service-vt` are mutually exclusive, mirroring
   the `order-service` / `order-service-vt` docker-compose profiles — both
   consume/produce against the same Kafka topic and Mongo collection.

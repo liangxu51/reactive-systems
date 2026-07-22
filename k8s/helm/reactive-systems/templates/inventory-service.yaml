@@ -29,6 +29,8 @@ spec:
         - name: inventory-service
           image: "{{ .Values.inventoryService.image.repository }}:{{ .Values.inventoryService.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.imagePullPolicy }}
+          env:
+            {{- include "reactive-systems.mongoUriEnv" . | nindent 12 }}
           ports:
             - containerPort: {{ .Values.inventoryService.containerPort }}
           readinessProbe:

@@ -1,4 +1,8 @@
 version: '3'
+x-mongo-app-env: &mongo-app-env
+  # Overrides application-docker.properties' credential-free default via
+  # Spring's relaxed env-var binding - see issue #33.
+  SPRING_MONGODB_URI: mongodb://${MONGO_APP_USERNAME:-reactive-systems-app}:${MONGO_APP_PASSWORD:-reactive-systems-dev-app}@mongo-db:27017/reactive-systems?replicaSet=rs0&authSource=admin
 services:
   frontend:
     build: ./frontend
@@ -28,9 +32,31 @@ services:
   mongodb:
     container_name: mongo-db
     image: mongo:4.4
-    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    environment:
+      # Dev-only defaults - real deployments (the Helm chart) generate
+      # random passwords into a Kubernetes Secret instead. Override these
+      # via a .env file if you want different local credentials.
+      MONGO_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-root}
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-reactive-systems-dev-root}
+      MONGO_APP_USERNAME: ${MONGO_APP_USERNAME:-reactive-systems-app}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:-reactive-systems-dev-app}
+    # Generates a keyfile on first boot (persisted alongside the data dir
+    # so it survives restarts) and starts mongod with it. --keyFile implies
+    # --auth, enabling both internal replica-set-member auth and client
+    # auth - see issue #33.
+    entrypoint: []
+    command: >
+      bash -c "
+        mkdir -p /data/keyfile
+        if [ ! -f /data/keyfile/mongo-keyfile ]; then
+          head -c 756 /dev/urandom | base64 > /data/keyfile/mongo-keyfile
+          chmod 600 /data/keyfile/mongo-keyfile
+        fi
+        exec mongod --replSet rs0 --bind_ip_all --keyFile /data/keyfile/mongo-keyfile
+      "
     volumes:
       - ~/mongo:/data/db
+      - ~/mongo-keyfile:/data/keyfile
     ports:
       - "27017:27017"
     healthcheck:
@@ -43,18 +69,60 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+    # Shares mongo-db's network namespace instead of talking to it over the
+    # bridge network, so this connects as genuine localhost from mongod's
+    # point of view - the only way to run admin commands (rs.initiate(),
+    # creating the first user) before auth is enforced, per MongoDB's
+    # "localhost exception". A normal inter-container connection doesn't
+    # qualify once --keyFile/--auth is on. The exception covers exactly one
+    # privileged write per connection (not the rest of that session), so the
+    # root user is created via the exception and then used to authenticate
+    # for creating the app user, rather than creating both in one pass.
+    network_mode: "service:mongodb"
     restart: "no"
+    environment:
+      MONGO_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-root}
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-reactive-systems-dev-root}
+      MONGO_APP_USERNAME: ${MONGO_APP_USERNAME:-reactive-systems-app}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:-reactive-systems-dev-app}
     command: >
-      mongo --host mongo-db --eval "
-        if (rs.status().ok === 1) {
-          print('replica set already initiated');
-        } else {
-          rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'mongo-db:27017'}]});
-        }
+      bash -c "
+        until mongo --host localhost --quiet --eval \"print('ok')\" >/dev/null 2>&1; do sleep 2; done
+        ALREADY_BOOTSTRAPPED=$$(mongo --host localhost --quiet --eval \"rs.status().codeName === 'Unauthorized'\" 2>/dev/null | tail -1)
+        if [ \"$$ALREADY_BOOTSTRAPPED\" = \"true\" ]; then
+          echo 'replica set and users already bootstrapped on an earlier run'
+          exit 0
+        fi
+        mongo --host localhost --quiet --eval \"
+          if (rs.status().ok === 1) {
+            print('replica set already initiated');
+          } else {
+            rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'localhost:27017'}]});
+          }
+        \"
+        until mongo --host localhost --quiet --eval \"db.isMaster().ismaster\" 2>/dev/null | grep -q true; do sleep 2; done
+        mongo --host localhost --eval \"
+          try {
+            db.getSiblingDB('admin').createUser({user: '$$MONGO_ROOT_USERNAME', pwd: '$$MONGO_ROOT_PASSWORD', roles: [{role: 'root', db: 'admin'}]});
+            print('root user created');
+          } catch (e) {
+            print('root user bootstrap skipped (already provisioned): ' + e);
+          }
+        \"
+        mongo --host localhost -u \"$$MONGO_ROOT_USERNAME\" -p \"$$MONGO_ROOT_PASSWORD\" --authenticationDatabase admin --eval \"
+          try {
+            db.getSiblingDB('admin').createUser({user: '$$MONGO_APP_USERNAME', pwd: '$$MONGO_APP_PASSWORD', roles: [{role: 'readWrite', db: 'reactive-systems'}]});
+            print('app user created');
+          } catch (e) {
+            print('app user bootstrap skipped (already provisioned): ' + e);
+          }
+        \"
       "
   order-service:
     profiles: ["order-service"]
     build: ./order-service
+    environment:
+      <<: *mongo-app-env
     ports:
       - "8080:8080"
     depends_on:
@@ -65,6 +133,8 @@ services:
   order-service-vt:
     profiles: ["order-service-vt"]
     build: ./order-service-vt
+    environment:
+      <<: *mongo-app-env
     ports:
       - "8080:8083"
     depends_on:
@@ -74,6 +144,8 @@ services:
         condition: service_completed_successfully
   inventory-service:
     build: ./inventory-service
+    environment:
+      <<: *mongo-app-env
     ports:
       - "8081:8081"
     depends_on:
@@ -83,6 +155,8 @@ services:
         condition: service_completed_successfully
   shipping-service:
     build: ./shipping-service
+    environment:
+      <<: *mongo-app-env
     ports:
       - "8082:8082"
     depends_on:

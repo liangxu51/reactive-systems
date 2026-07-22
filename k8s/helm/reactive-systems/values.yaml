@@ -41,6 +41,12 @@ mongodb:
     limits:
       cpu: "1"
       memory: 1Gi
+  auth:
+    # Usernames aren't secret, only the passwords - those are generated
+    # once per release and persisted in the mongo-credentials Secret (see
+    # templates/mongo-secret.yaml) rather than living here in plain values.
+    rootUsername: root
+    appUsername: reactive-systems-app
 
 zookeeper:
   image: confluentinc/cp-zookeeper:latest
