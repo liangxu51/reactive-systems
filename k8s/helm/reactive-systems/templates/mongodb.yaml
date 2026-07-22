@@ -44,7 +44,7 @@ spec:
           # restart. The per-pod DNS name from the headless Service below is
           # the only identity that is both self-resolvable and stable across
           # restarts.
-          command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+          command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--wiredTigerCacheSizeGB", {{ .Values.mongodb.wiredTigerCacheSizeGB | quote }}]
           ports:
             - containerPort: 27017
           resources:

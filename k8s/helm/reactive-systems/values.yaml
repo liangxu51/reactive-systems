@@ -28,8 +28,12 @@ mongodb:
   persistence:
     enabled: true
     size: 1Gi
-  # WiredTiger's default cache is (RAM - 1GB) / 2, so the memory limit needs
-  # headroom above the cache or mongod risks an OOM kill under load.
+  # WiredTiger's default cache formula - max((RAM - 1GB) / 2, 256MB) - sizes
+  # off the node's total RAM, not this container's cgroup limit, so it can
+  # size itself larger than the limit below and get OOM-killed. Pin it
+  # explicitly instead, leaving headroom under memory.limits for connections,
+  # the OS page cache, etc.
+  wiredTigerCacheSizeGB: "0.25"
   resources:
     requests:
       cpu: 250m
