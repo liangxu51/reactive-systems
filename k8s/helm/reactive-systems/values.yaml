@@ -28,6 +28,15 @@ mongodb:
   persistence:
     enabled: true
     size: 1Gi
+  # WiredTiger's default cache is (RAM - 1GB) / 2, so the memory limit needs
+  # headroom above the cache or mongod risks an OOM kill under load.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
 
 zookeeper:
   image: confluentinc/cp-zookeeper:latest
