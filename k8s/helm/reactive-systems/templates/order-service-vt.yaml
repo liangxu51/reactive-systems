@@ -35,6 +35,7 @@ spec:
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           env:
             {{- include "reactive-systems.mongoUriEnv" . | nindent 12 }}
+            {{- include "reactive-systems.apiAuthEnv" . | nindent 12 }}
           ports:
             - containerPort: {{ .Values.orderServiceVt.containerPort }}
           readinessProbe:
