@@ -58,6 +58,7 @@ class OrderServiceIntegrationTest {
 
         Order result = webTestClient.post()
             .uri("/api/orders")
+            .headers(headers -> headers.setBasicAuth("test", "test-only-not-a-real-credential"))
             .contentType(MediaType.APPLICATION_JSON)
             .bodyValue(order)
             .exchange()
@@ -85,6 +86,7 @@ class OrderServiceIntegrationTest {
 
         List<Order> result = webTestClient.get()
             .uri("/api/orders")
+            .headers(headers -> headers.setBasicAuth("test", "test-only-not-a-real-credential"))
             .accept(MediaType.APPLICATION_JSON)
             .exchange()
             .expectStatus().isOk()
