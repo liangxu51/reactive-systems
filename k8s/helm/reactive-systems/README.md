@@ -98,6 +98,11 @@ db.product.insertMany([
 
 ## Notes
 
+- Dataplane V2 / Service-mesh note: For production GKE deployments, prefer enabling GKE Dataplane V2 (kernel-level eBPF encryption) to get transparent pod-to-pod encryption without application changes. If fine-grained policies, telemetry, or advanced routing are needed, use a service mesh (Istio/Anthos) instead. See `k8s/GKE_DEPLOYMENT.md` for details and migration guidance.
+
+
+## Notes
+
 - MongoDB and Kafka Services are named `mongo-db` and `kafka-broker` to
   match the hostnames already baked into each service's
   `application-docker.properties` (the `docker` Spring profile is what the
