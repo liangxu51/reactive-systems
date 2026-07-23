@@ -235,3 +235,15 @@ For enhanced Copilot sessions, consider configuring these MCP servers in your Co
 - **MongoDB Documentation** — Reference MongoDB query and aggregation syntax
 
 These can be configured at the organization or personal Copilot settings level.
+
+## Dataplane V2 & Service Mesh Guidance
+
+When deploying to GKE, prefer cluster-level encryption (Dataplane V2) for in-cluster pod-to-pod traffic:
+- Dataplane V2 provides transparent eBPF-based encryption for all pod-to-pod traffic, including app→MongoDB
+- Use Istio/Anthos when traffic policies, observability, or advanced routing/telemetry are required
+- If MongoDB or Kafka are external managed services, keep app-level TLS to protect those connections
+
+For local **minikube** development:
+- Optionally enable Istio for encrypted (mTLS) pod-to-pod communication and to test service-mesh patterns
+- See `k8s/ISTIO_MINIKUBE.md` for step-by-step Istio setup on minikube
+- See `k8s/GKE_DEPLOYMENT.md` for production GKE deployment with Dataplane V2

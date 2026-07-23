@@ -136,6 +136,7 @@ db.product.insertMany([
   the other two services), so it never opens an HTTP port — it's a pure
   Kafka consumer/producer. Its Deployment intentionally has no Service,
   ports, or probes.
+- **Encryption for local testing**: Optionally enable Istio on minikube for encrypted (mTLS) pod-to-pod communication. See `k8s/ISTIO_MINIKUBE.md` for setup and testing instructions.
 
 ## Fixed: shipping-service Order.shippingDate bug
 
