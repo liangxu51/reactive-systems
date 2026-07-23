@@ -45,4 +45,14 @@ public class Order {
         return this;
     }
 
+    // SEC-004: Lombok's @Data toString() recursed into shippingAddress
+    // (name/house/street/city/zip) and userId, so every log.info(..., order)
+    // call across the saga wrote unredacted customer PII to plaintext logs.
+    // Override toString() to log only non-PII fields Lombok would otherwise
+    // include automatically.
+    @Override
+    public String toString() {
+        return "Order[id=" + id + ", orderStatus=" + orderStatus + "]";
+    }
+
 }

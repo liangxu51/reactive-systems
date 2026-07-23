@@ -40,4 +40,14 @@ public class Order {
         return this;
     }
 
+    // SEC-004: Lombok's @Data toString() included userId, so every
+    // log.info(..., order) call across the saga wrote a customer identifier
+    // to plaintext logs. Override toString() to log only non-PII fields
+    // Lombok would otherwise include automatically.
+    @Override
+    public String toString() {
+        return "Order[id=" + id + ", orderStatus=" + orderStatus
+            + ", lineItems=" + (lineItems == null ? 0 : lineItems.size()) + " items]";
+    }
+
 }
