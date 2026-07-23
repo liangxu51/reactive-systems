@@ -26,3 +26,6 @@ gha-creds-*.json
 
 # local output from the Playwright MCP server (console logs, page snapshots, screenshots)
 .playwright-mcp/
+
+# MongoDB TLS certificates (environment-specific, should not be committed)
+mongodb-certs/

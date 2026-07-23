@@ -28,9 +28,18 @@ services:
   mongodb:
     container_name: mongo-db
     image: mongo:4.4
-    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    command: [
+      "mongod",
+      "--replSet", "rs0",
+      "--bind_ip_all",
+      "--tlsMode", "preferTLS",
+      "--tlsCertificateKeyFile", "/etc/mongod-tls/server-combined.pem",
+      "--tlsCAFile", "/etc/mongod-tls/ca-cert.pem"
+    ]
     volumes:
       - ~/mongo:/data/db
+      - ./mongodb-certs/server-combined.pem:/etc/mongod-tls/server-combined.pem:ro
+      - ./mongodb-certs/ca-cert.pem:/etc/mongod-tls/ca-cert.pem:ro
     ports:
       - "27017:27017"
     healthcheck:
