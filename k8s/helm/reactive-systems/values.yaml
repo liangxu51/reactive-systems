@@ -48,6 +48,16 @@ mongodb:
     rootUsername: root
     appUsername: reactive-systems-app
 
+api:
+  auth:
+    # Shared HTTP Basic credential across order-service/order-service-vt/
+    # inventory-service (SEC-001, PR #72) - see MODERNIZATION_BRIEF.md's
+    # target architecture note on a shared operator credential. Username
+    # isn't secret, only the password - that's generated once per release
+    # and persisted in the api-credentials Secret (see
+    # templates/api-secret.yaml) rather than living here in plain values.
+    username: admin
+
 zookeeper:
   image: confluentinc/cp-zookeeper:latest
   serviceName: zookeeper
