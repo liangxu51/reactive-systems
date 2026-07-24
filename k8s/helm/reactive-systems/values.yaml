@@ -47,6 +47,23 @@ mongodb:
     # templates/mongo-secret.yaml) rather than living here in plain values.
     rootUsername: root
     appUsername: reactive-systems-app
+    # Least-privilege identity for mongodump (see templates/mongo-backup.yaml)
+    # - granted only the built-in 'backup' role, not readWrite/root.
+    backupUsername: reactive-systems-backup
+  # Scheduled mongodump backups (#36) - see templates/mongo-backup.yaml.
+  # Lands on a local PVC, not off-cluster object storage: this chart targets
+  # a single-node minikube dev cluster (see header above), so it protects
+  # against accidental deletes/bad writes/replica-set corruption, but NOT
+  # against losing the node/cluster entirely. Point retentionDays' pruning
+  # and the destination at real off-cluster storage before using this
+  # pattern anywhere durability actually matters.
+  backup:
+    enabled: true
+    # Daily at 02:00.
+    schedule: "0 2 * * *"
+    retentionDays: 7
+    persistence:
+      size: 2Gi
 
 api:
   auth:

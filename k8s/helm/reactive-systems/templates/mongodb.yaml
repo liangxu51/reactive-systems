@@ -112,6 +112,13 @@ spec:
                 secretKeyRef:
                   name: mongo-credentials
                   key: app-password
+            - name: BACKUP_USERNAME
+              value: {{ .Values.mongodb.auth.backupUsername | quote }}
+            - name: BACKUP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mongo-credentials
+                  key: backup-password
           command:
             - sh
             - -c
@@ -207,6 +214,22 @@ spec:
                   print('app user created');
                 } catch (e) {
                   print('app user bootstrap skipped (already provisioned): ' + e);
+                }
+              "
+
+              # Built-in 'backup' role (not readWrite/root) - exactly what
+              # mongodump needs (see templates/mongo-backup.yaml) and nothing
+              # more.
+              mongo --host localhost -u "$ROOT_USERNAME" -p "$ROOT_PASSWORD" --authenticationDatabase admin --eval "
+                try {
+                  db.getSiblingDB('admin').createUser({
+                    user: '$BACKUP_USERNAME',
+                    pwd: '$BACKUP_PASSWORD',
+                    roles: [{role: 'backup', db: 'admin'}]
+                  });
+                  print('backup user created');
+                } catch (e) {
+                  print('backup user bootstrap skipped (already provisioned): ' + e);
                 }
               "
 

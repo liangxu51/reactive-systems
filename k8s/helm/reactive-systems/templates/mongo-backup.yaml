@@ -1,0 +1,73 @@
+{{- if .Values.mongodb.backup.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongo-backup-data
+  labels:
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.mongodb.backup.persistence.size }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mongo-backup
+  labels:
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.mongodb.backup.schedule | quote }}
+  # Never run two dumps at once against the shared, ReadWriteOnce backup PVC.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: mongodump
+              image: {{ .Values.mongodb.image }}
+              env:
+                - name: BACKUP_USERNAME
+                  value: {{ .Values.mongodb.auth.backupUsername | quote }}
+                - name: BACKUP_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: mongo-credentials
+                      key: backup-password
+              command:
+                - sh
+                - -c
+                - |
+                  set -e
+                  TS=$(date +%Y%m%d%H%M%S)
+                  # replicaSet=rs0 (not just the headless Service name) so the
+                  # driver runs full topology discovery instead of treating
+                  # whichever pod IP it happens to resolve as a standalone -
+                  # same lesson as the app services' SPRING_MONGODB_URI, see
+                  # _helpers.tpl. secondaryPreferred keeps dump reads off the
+                  # primary where possible.
+                  mongodump \
+                    --uri="mongodb://${BACKUP_USERNAME}:${BACKUP_PASSWORD}@{{ .Values.mongodb.serviceName }}:{{ .Values.mongodb.port }}/reactive-systems?replicaSet=rs0&authSource=admin&readPreference=secondaryPreferred" \
+                    --gzip \
+                    --archive=/backup/reactive-systems-$TS.archive.gz
+                  echo "wrote /backup/reactive-systems-$TS.archive.gz"
+
+                  # Retention: drop archives older than retentionDays. Runs
+                  # every backup, not as a separate CronJob, so pruning never
+                  # drifts out of sync with what's actually landing here.
+                  find /backup -maxdepth 1 -name 'reactive-systems-*.archive.gz' \
+                    -mtime +{{ .Values.mongodb.backup.retentionDays }} -delete
+              volumeMounts:
+                - name: backup-data
+                  mountPath: /backup
+          volumes:
+            - name: backup-data
+              persistentVolumeClaim:
+                claimName: mongo-backup-data
+{{- end }}

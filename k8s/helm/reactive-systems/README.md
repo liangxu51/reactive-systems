@@ -137,6 +137,62 @@ db.product.insertMany([
   Kafka consumer/producer. Its Deployment intentionally has no Service,
   ports, or probes.
 
+## Backups (#36)
+
+A `mongo-backup` CronJob runs `mongodump` against the replica set on the
+schedule in `mongodb.backup.schedule` (`values.yaml`, daily at 02:00 by
+default), writing a gzip archive per run to the `mongo-backup-data` PVC and
+pruning archives older than `mongodb.backup.retentionDays` (default 7) on
+every run. It authenticates as a dedicated `reactive-systems-backup` user
+scoped to MongoDB's built-in `backup` role - not `readWrite`/root - so a
+compromised backup credential can't write or delete application data.
+
+> ⚠️ **Local PVC only, not off-cluster.** This protects against accidental
+> deletes, bad writes, or replica-set corruption, but not against losing the
+> node/cluster itself - archives live on the same cluster as the data
+> they're backing up. Point this at real object storage (S3/GCS/etc.) before
+> relying on it anywhere durability actually matters.
+
+Trigger a backup manually instead of waiting for the schedule:
+
+```bash
+kubectl create job -n reactive-systems mongo-backup-manual --from=cronjob/mongo-backup
+kubectl wait -n reactive-systems --for=condition=complete job/mongo-backup-manual --timeout=120s
+```
+
+List available archives:
+
+```bash
+kubectl run -n reactive-systems mongo-backup-shell --rm -it --restart=Never \
+  --image=mongo:4.4 --overrides='{"spec":{"containers":[{"name":"mongo-backup-shell","image":"mongo:4.4","command":["ls","-la","/backup"],"volumeMounts":[{"name":"backup-data","mountPath":"/backup"}]}],"volumes":[{"name":"backup-data","persistentVolumeClaim":{"claimName":"mongo-backup-data"}}]}}'
+```
+
+### Restore runbook
+
+MongoDB's built-in `backup` role (what the CronJob's credential holds) is
+read-only by design and can't restore - `mongorestore` needs privileges
+(create collections/indexes, bypass document validation) that only the
+`restore` role or a full admin has. Rather than granting the automated
+backup credential restore power too, this rare, human-triggered action uses
+the `root` credential already documented above under Auth (#33):
+
+```bash
+ROOT_PASSWORD=$(kubectl get secret mongo-credentials -n reactive-systems -o jsonpath='{.data.root-password}' | base64 -d)
+```
+
+Restoring `--drop`s existing collections first, so this is destructive to
+whatever's currently in `reactive-systems` - confirm you actually want to
+overwrite it before running this against anything but a scratch/disaster-recovery
+target:
+
+```bash
+kubectl run -n reactive-systems mongo-restore --rm -it --restart=Never \
+  --image=mongo:4.4 --overrides='{"spec":{"containers":[{"name":"mongo-restore","image":"mongo:4.4","command":["sh","-c","mongorestore --uri=\"mongodb://root:'"$ROOT_PASSWORD"'@mongo-db:27017/reactive-systems?replicaSet=rs0\\u0026authSource=admin\" --gzip --archive=/backup/ARCHIVE_FILENAME.archive.gz --drop"],"volumeMounts":[{"name":"backup-data","mountPath":"/backup"}]}],"volumes":[{"name":"backup-data","persistentVolumeClaim":{"claimName":"mongo-backup-data"}}]}}'
+```
+
+Replace `ARCHIVE_FILENAME.archive.gz` with the archive from the "list
+available archives" command above.
+
 ## Fixed: shipping-service Order.shippingDate bug
 
 Previously, once an order reached `PREPARE_SHIPPING`, `shipping-service`
