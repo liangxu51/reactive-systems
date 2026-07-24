@@ -78,14 +78,31 @@ spec:
             - name: keyfile
               mountPath: /keyfile
               readOnly: true
+          # A TCP probe only proves mongod is accepting connections, not that
+          # this member can actually serve reads/writes - it would happily
+          # pass while the node is RECOVERING, ROLLBACK, or REMOVED from the
+          # replica set. `hello` (unlike replSetGetStatus) is one of the few
+          # commands mongod answers without authentication, so no creds are
+          # needed here; quit()'s exit code is what the kubelet actually
+          # checks; the printed result is discarded (--quiet).
           readinessProbe:
-            tcpSocket:
-              port: 27017
+            exec:
+              command:
+                - mongo
+                - --quiet
+                - --eval
+                - "quit(db.hello().isWritablePrimary || db.hello().secondary ? 0 : 1)"
             initialDelaySeconds: 5
+            timeoutSeconds: 5
           livenessProbe:
-            tcpSocket:
-              port: 27017
+            exec:
+              command:
+                - mongo
+                - --quiet
+                - --eval
+                - "quit(db.hello().isWritablePrimary || db.hello().secondary ? 0 : 1)"
             initialDelaySeconds: 15
+            timeoutSeconds: 5
         # Bootstraps the replica set and the initial users. This has to run
         # as a sidecar inside the mongo-db-0 pod (not a separate Job, as
         # before #33) because MongoDB's localhost exception - the only way
