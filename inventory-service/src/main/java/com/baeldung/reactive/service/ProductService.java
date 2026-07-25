@@ -34,6 +34,15 @@ public class ProductService {
                     .findAny()
                     .get()
                     .getQuantity();
+                // SEC-101: Kafka publishes to `orders` are unauthenticated (tracked
+                // separately as issue #42 - fixing that needs live-cluster SASL
+                // testing, not a blind config patch). Until then, a forged message
+                // with a non-positive quantity must not reach the stock math below -
+                // `stock - (negative q)` would silently increase stock instead of
+                // reserving it.
+                if (q <= 0) {
+                    return Mono.error(new IllegalArgumentException("Invalid quantity for product " + p.getId() + ": " + q));
+                }
                 if (p.getStock() >= q) {
                     p.setStock(p.getStock() - q);
                     return productRepository.save(p);
@@ -57,6 +66,12 @@ public class ProductService {
                     .get(0)
                     .getQuantity();
 
+                // SEC-101: same non-positive-quantity guard as handleOrder - without
+                // it, a forged revert message with a negative quantity decreases
+                // stock instead of restoring it.
+                if (q <= 0) {
+                    return Mono.error(new IllegalArgumentException("Invalid quantity for product " + p.getId() + ": " + q));
+                }
                 p.setStock(p.getStock() + q);
                 return productRepository.save(p);
             })
