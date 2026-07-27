@@ -1,12 +1,13 @@
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: kafka-broker
   labels:
     app: kafka-broker
     {{- include "reactive-systems.labels" . | nindent 4 }}
 spec:
-  replicas: 1
+  serviceName: {{ .Values.kafka.serviceName }}
+  replicas: {{ .Values.kafka.replicaCount }}
   selector:
     matchLabels:
       app: kafka-broker
@@ -15,22 +16,54 @@ spec:
       labels:
         app: kafka-broker
     spec:
+      # Soft (preferred) rather than required - see mongodb.yaml for why:
+      # this chart's default target is a single-node minikube cluster, where
+      # a hard anti-affinity rule would leave replicas 1 and 2 Pending
+      # forever.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: kafka-broker
+                topologyKey: kubernetes.io/hostname
       containers:
         - name: kafka-broker
           image: {{ .Values.kafka.image }}
+          # cp-kafka's own entrypoint (/etc/confluent/docker/run) only reads
+          # env vars, but broker.id and advertised.listeners must be unique
+          # per broker - a StatefulSet's stable per-pod name (kafka-broker-0,
+          # -1, -2, ...) already gives us that, so derive both from it here
+          # instead of hardcoding one broker's identity into values.yaml.
+          command:
+            - bash
+            - -c
+            - |
+              POD_NAME=$(hostname)
+              export KAFKA_BROKER_ID=${POD_NAME##*-}
+              # Each broker must advertise its OWN stable per-pod DNS name
+              # (from the headless Service below), not the shared service
+              # name - otherwise every broker's metadata response points
+              # clients at the same address and only one of the three is
+              # ever actually reachable. Same reasoning as mongo-db's
+              # per-pod host list in mongodb.yaml.
+              export KAFKA_ADVERTISED_LISTENERS="PLAINTEXT://${POD_NAME}.{{ .Values.kafka.serviceName }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.kafka.port }}"
+              exec /etc/confluent/docker/run
           env:
-            - name: KAFKA_BROKER_ID
-              value: "{{ .Values.kafka.brokerId }}"
             - name: KAFKA_ZOOKEEPER_CONNECT
               value: "{{ .Values.zookeeper.serviceName }}:{{ .Values.zookeeper.clientPort }}"
-            - name: KAFKA_ADVERTISED_LISTENERS
-              value: "PLAINTEXT://{{ .Values.kafka.serviceName }}:{{ .Values.kafka.port }}"
             - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
               value: "PLAINTEXT:PLAINTEXT"
             - name: KAFKA_INTER_BROKER_LISTENER_NAME
               value: "PLAINTEXT"
             - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
               value: "{{ .Values.kafka.offsetsTopicReplicationFactor }}"
+            - name: KAFKA_DEFAULT_REPLICATION_FACTOR
+              value: "{{ .Values.kafka.defaultReplicationFactor }}"
+            - name: KAFKA_MIN_INSYNC_REPLICAS
+              value: "{{ .Values.kafka.minInsyncReplicas }}"
           ports:
             - containerPort: {{ .Values.kafka.port }}
           readinessProbe:
@@ -51,6 +84,15 @@ metadata:
     app: kafka-broker
     {{- include "reactive-systems.labels" . | nindent 4 }}
 spec:
+  # Headless (clusterIP: None): required for a StatefulSet to give each pod
+  # its own stable per-pod DNS name (kafka-broker-0.kafka-broker...), which
+  # KAFKA_ADVERTISED_LISTENERS above relies on. Client bootstrapping (
+  # spring.kafka.bootstrap-servers=kafka-broker:9092) still works fine
+  # against a headless service - any one resolved broker answers the
+  # initial connection with full cluster metadata (including every broker's
+  # real advertised address), and the client then talks directly to
+  # whichever broker(s) it actually needs.
+  clusterIP: None
   selector:
     app: kafka-broker
   ports:

@@ -193,6 +193,51 @@ kubectl run -n reactive-systems mongo-restore --rm -it --restart=Never \
 Replace `ARCHIVE_FILENAME.archive.gz` with the archive from the "list
 available archives" command above.
 
+## Kafka HA (#40)
+
+`kafka-broker` runs as a 3-replica StatefulSet (not a single Deployment
+replica) behind a headless Service, mirroring `mongo-db`'s fix: each pod
+derives its `broker.id` and `advertised.listeners` from its own stable
+per-pod name (`kafka-broker-0`, `-1`, `-2`) at container start, rather than
+one hardcoded identity in `values.yaml` (see `kafka.yaml`). Losing any one
+broker pod no longer stalls every producer/consumer across all three
+services.
+
+`kafka.defaultReplicationFactor` (3) and `kafka.minInsyncReplicas` (2) in
+`values.yaml` are broker-level defaults applied to auto-created topics
+(`auto.create.topics.enable` is on by default) - this covers the `orders`
+topic, since nothing in this repo creates it explicitly. All three services'
+Kafka producers also set `spring.kafka.producer.acks=all`, so a produce
+blocks until 2 of 3 replicas have the write, not just the leader.
+
+> ⚠️ **Only applies to a fresh topic.** `default.replication.factor` and
+> `min.insync.replicas` only take effect when a topic is auto-created -
+> upgrading an existing release whose `orders` topic was already created
+> with replication factor 1 won't retroactively fix it. Check and fix it up
+> manually instead:
+>
+> ```bash
+> kubectl exec -n reactive-systems kafka-broker-0 -- kafka-topics \
+>   --bootstrap-server localhost:9092 --describe --topic orders
+> ```
+>
+> If `ReplicationFactor` is still `1`, reassign each partition across all
+> three brokers (adjust the partition list to match `--describe`'s output)
+> and then raise the topic's `min.insync.replicas`:
+>
+> ```bash
+> kubectl exec -n reactive-systems kafka-broker-0 -- bash -c '
+>   cat <<EOF > /tmp/reassign.json
+> {"version":1,"partitions":[{"topic":"orders","partition":0,"replicas":[0,1,2]}]}
+> EOF
+>   kafka-reassign-partitions --bootstrap-server localhost:9092 \
+>     --reassignment-json-file /tmp/reassign.json --execute'
+>
+> kubectl exec -n reactive-systems kafka-broker-0 -- kafka-configs \
+>   --bootstrap-server localhost:9092 --entity-type topics --entity-name orders \
+>   --alter --add-config min.insync.replicas=2
+> ```
+
 ## Fixed: shipping-service Order.shippingDate bug
 
 Previously, once an order reached `PREPARE_SHIPPING`, `shipping-service`
