@@ -103,4 +103,43 @@ class ProductServiceUnitTest {
         verify(productRepository).save(product);
     }
 
+    @Test
+    void givenNegativeQuantity_whenHandleOrder_thenErrorsAndStockIsUnchanged() {
+        order.setLineItems(List.of(new LineItem().setProductId(productId).setQuantity(-3)));
+        when(productRepository.findById(productId)).thenReturn(Mono.just(product));
+
+        StepVerifier.create(productService.handleOrder(order))
+            .expectErrorMessage("Invalid quantity for product " + productId + ": -3")
+            .verify();
+
+        assertThat(product.getStock()).isEqualTo(5);
+        verify(productRepository, never()).save(any(Product.class));
+    }
+
+    @Test
+    void givenZeroQuantity_whenHandleOrder_thenErrorsAndStockIsUnchanged() {
+        order.setLineItems(List.of(new LineItem().setProductId(productId).setQuantity(0)));
+        when(productRepository.findById(productId)).thenReturn(Mono.just(product));
+
+        StepVerifier.create(productService.handleOrder(order))
+            .expectErrorMessage("Invalid quantity for product " + productId + ": 0")
+            .verify();
+
+        assertThat(product.getStock()).isEqualTo(5);
+        verify(productRepository, never()).save(any(Product.class));
+    }
+
+    @Test
+    void givenNegativeQuantity_whenRevertOrder_thenErrorsAndStockIsUnchanged() {
+        order.setLineItems(List.of(new LineItem().setProductId(productId).setQuantity(-3)));
+        when(productRepository.findById(productId)).thenReturn(Mono.just(product));
+
+        StepVerifier.create(productService.revertOrder(order))
+            .expectErrorMessage("Invalid quantity for product " + productId + ": -3")
+            .verify();
+
+        assertThat(product.getStock()).isEqualTo(5);
+        verify(productRepository, never()).save(any(Product.class));
+    }
+
 }
