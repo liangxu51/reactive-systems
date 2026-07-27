@@ -55,8 +55,8 @@ spec:
           image: {{ .Values.mongodb.image }}
           # inventory-service uses reactive MongoDB transactions, which
           # only work against a replica set - see the mongo-init sidecar
-          # below for the one-time rs.initiate() that forms the
-          # {{ .Values.mongodb.replicaCount }}-member replica set named rs0. Each member host is
+          # below for the rs.initiate()+rs.add() calls that incrementally
+          # form the {{ .Values.mongodb.replicaCount }}-member replica set named rs0. Each member host is
           # that pod's stable per-pod DNS name (mongo-db-0.<headless
           # service>...), not the Service name itself: a ClusterIP is a
           # virtual address never bound to a real interface inside the pod
@@ -149,16 +149,6 @@ spec:
                 echo waiting for local mongod; sleep 2;
               done
 
-              # rs.initiate()'s quorum check requires every member listed in
-              # the config to respond, not just a majority - so unlike a
-              # single-member set, we must wait for ALL {{ .Values.mongodb.replicaCount }} pods to be
-              # reachable before calling it, not just this one.
-              {{- range $i := until (int .Values.mongodb.replicaCount) }}
-              until mongo --host mongo-db-{{ $i }}.{{ $.Values.mongodb.serviceName }}.{{ $.Release.Namespace }}.svc.cluster.local --quiet --eval "print('ok')" >/dev/null 2>&1; do
-                echo waiting for mongo-db-{{ $i }}; sleep 2;
-              done
-              {{- end }}
-
               # Once the root user exists, replSetGetStatus itself requires
               # auth, so an unauthenticated rs.status() reliably comes back
               # with codeName Unauthorized - that alone proves bootstrap
@@ -175,23 +165,25 @@ spec:
                 sleep infinity
               fi
 
+              # Initiate as a LONE member first, not with all
+              # {{ .Values.mongodb.replicaCount }} members up front like a plain rs.initiate() would
+              # need. The StatefulSet's default OrderedReady pod management
+              # only creates mongo-db-1 once mongo-db-0 passes ITS OWN
+              # readiness probe, and that probe requires already being part
+              # of an initiated replica set - waiting here for every member
+              # to be reachable first would deadlock permanently, since
+              # pods 1..N would never even get created to become reachable.
+              # A lone-member set makes mongo-db-0 primary (and therefore
+              # Ready) immediately, unblocking the StatefulSet; the
+              # remaining members are added one at a time below, each only
+              # once the StatefulSet has actually created that pod.
               mongo --host localhost --quiet --eval "
                 if (rs.status().ok === 1) {
                   print('replica set already initiated');
                 } else {
-                  // One member per StatefulSet replica, addressed by its
-                  // stable per-pod DNS name (NOT the Service name itself -
-                  // see above for why that's the only self-resolvable,
-                  // restart-stable identity mongod can use). With
-                  // {{ .Values.mongodb.replicaCount }} voting members the set has a real majority
-                  // and keeps serving reads/writes through the loss of any one pod.
                   rs.initiate({
                     _id: 'rs0',
-                    members: [
-                      {{- range $i := until (int .Values.mongodb.replicaCount) }}
-                      {_id: {{ $i }}, host: 'mongo-db-{{ $i }}.{{ $.Values.mongodb.serviceName }}.{{ $.Release.Namespace }}.svc.cluster.local:27017'}{{ if lt (add1 $i) (int $.Values.mongodb.replicaCount) }},{{ end }}
-                      {{- end }}
-                    ]
+                    members: [{_id: 0, host: 'mongo-db-0.{{ .Values.mongodb.serviceName }}.{{ .Release.Namespace }}.svc.cluster.local:27017'}]
                   });
                 }
               "
@@ -203,11 +195,15 @@ spec:
               # Still covered by the localhost exception at this point:
               # nothing has authenticated yet and no user exists, so this
               # unauthenticated connection is allowed to create exactly one
-              # user. The exception covers only that one privileged write,
-              # not the rest of the session - a second createUser call in
-              # the same script still gets "requires authentication" - so
-              # the root user is created via the exception here, then used
-              # to authenticate for creating the app user below.
+              # user (the exception's other allowance, covering
+              # rs.initiate()/rs.status()/hello above, does NOT extend to
+              # rs.add()/replSetReconfig below - those need real auth even
+              # before any other user exists). The exception covers only
+              # this one privileged write, not the rest of the session - a
+              # second createUser call in the same script still gets
+              # "requires authentication" - so root is created via the
+              # exception here, then used to authenticate for everything
+              # after, including adding the remaining members below.
               mongo --host localhost --eval "
                 try {
                   db.getSiblingDB('admin').createUser({
@@ -220,6 +216,31 @@ spec:
                   print('root user bootstrap skipped (already provisioned): ' + e);
                 }
               "
+
+              # Add the remaining members one at a time, each only once
+              # it's actually reachable. Each addition is what lets THAT
+              # pod pass its own readiness probe next (it's now part of an
+              # initiated set), which is in turn what lets the StatefulSet
+              # create the pod after it - same OrderedReady chain as
+              # mongo-db-0 above. This relies on the mongo-db Service's
+              # publishNotReadyAddresses: true below: a not-yet-added pod
+              # isn't "Ready" yet, so without that setting its own per-pod
+              # DNS name wouldn't resolve at all and rs.add() could never
+              # reach it by host in the first place.
+              {{- range $i := until (int .Values.mongodb.replicaCount) }}
+              {{- if gt $i 0 }}
+              until mongo --host mongo-db-{{ $i }}.{{ $.Values.mongodb.serviceName }}.{{ $.Release.Namespace }}.svc.cluster.local --quiet --eval "print('ok')" >/dev/null 2>&1; do
+                echo waiting for mongo-db-{{ $i }}; sleep 2;
+              done
+              mongo --host localhost -u "$ROOT_USERNAME" -p "$ROOT_PASSWORD" --authenticationDatabase admin --quiet --eval "
+                if (rs.conf().members.some(m => m.host === 'mongo-db-{{ $i }}.{{ $.Values.mongodb.serviceName }}.{{ $.Release.Namespace }}.svc.cluster.local:27017')) {
+                  print('mongo-db-{{ $i }} already a member');
+                } else {
+                  rs.add('mongo-db-{{ $i }}.{{ $.Values.mongodb.serviceName }}.{{ $.Release.Namespace }}.svc.cluster.local:27017');
+                }
+              "
+              {{- end }}
+              {{- end }}
 
               mongo --host localhost -u "$ROOT_USERNAME" -p "$ROOT_PASSWORD" --authenticationDatabase admin --eval "
                 try {
@@ -291,6 +312,14 @@ spec:
   # its own stable per-pod DNS name (mongo-db-0.mongo-db...) instead of
   # load-balancing behind one virtual ClusterIP.
   clusterIP: None
+  # Without this, a pod's per-pod DNS name only resolves once THAT pod is
+  # Ready - but the mongo-init sidecar's incremental rs.add() (see above)
+  # needs to resolve a brand-new pod's hostname before it's part of any
+  # replica set, i.e. before it can possibly be Ready. A mutable Service
+  # field (unlike the StatefulSet's own podManagementPolicy, which is
+  # immutable once set), so this is safe to add without breaking `helm
+  # upgrade` on an already-existing release.
+  publishNotReadyAddresses: true
   selector:
     app: mongo-db
   ports:
