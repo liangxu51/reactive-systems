@@ -83,11 +83,45 @@ zookeeper:
 
 kafka:
   image: confluentinc/cp-kafka:7.4.0
-  # Matches the hostname baked into application-docker.properties.
+  # Matches the hostname baked into application-docker.properties. Stays a
+  # normal (non-headless) Service - see kafka.yaml's headlessServiceName for
+  # why per-pod DNS lives on a second, separate Service instead of turning
+  # this one headless: spec.clusterIP is immutable, so flipping an
+  # already-assigned ClusterIP to None here would break `helm upgrade` on
+  # every release installed before #40.
   serviceName: kafka-broker
+  # Headless governing Service for the StatefulSet - gives each broker pod
+  # its own stable per-pod DNS name (kafka-broker-0.kafka-broker-headless...)
+  # for KAFKA_ADVERTISED_LISTENERS, without touching kafka-broker itself.
+  headlessServiceName: kafka-broker-headless
   port: 9092
-  brokerId: 1
-  offsetsTopicReplicationFactor: 1
+  # 3 brokers (StatefulSet, see kafka.yaml) so losing any one broker no
+  # longer stalls every producer/consumer across all three services - see
+  # issue #40. broker.id is derived per-pod from the StatefulSet ordinal
+  # rather than set here.
+  replicaCount: 3
+  # Each broker's log dir - without a real PVC behind it, a pod eviction or
+  # node drain wipes that broker's entire committed log (ephemeral container
+  # filesystem), and losing more than one broker at once would permanently
+  # lose data despite acks=all/minInsyncReplicas below. disable for the old
+  # ephemeral emptyDir behavior.
+  persistence:
+    enabled: true
+    size: 1Gi
+  # Internal __consumer_offsets topic - matches replicaCount so consumer
+  # group offsets survive a broker loss too.
+  offsetsTopicReplicationFactor: 3
+  # Applies to auto-created topics (auto.create.topics.enable defaults to
+  # true on this image) - covers the "orders" topic, since nothing here
+  # creates it explicitly. Only takes effect for topics auto-created after
+  # this is set; see README's Kafka HA section for upgrading an
+  # already-existing "orders" topic.
+  defaultReplicationFactor: 3
+  # A produce with acks=all (see application-docker.properties) blocks
+  # until this many in-sync replicas have the write, not just the leader -
+  # 2 of 3 is the largest value that still tolerates one broker being down
+  # without producers failing outright.
+  minInsyncReplicas: 2
 
 orderService:
   enabled: true
