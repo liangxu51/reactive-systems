@@ -196,12 +196,25 @@ available archives" command above.
 ## Kafka HA (#40)
 
 `kafka-broker` runs as a 3-replica StatefulSet (not a single Deployment
-replica) behind a headless Service, mirroring `mongo-db`'s fix: each pod
-derives its `broker.id` and `advertised.listeners` from its own stable
-per-pod name (`kafka-broker-0`, `-1`, `-2`) at container start, rather than
-one hardcoded identity in `values.yaml` (see `kafka.yaml`). Losing any one
-broker pod no longer stalls every producer/consumer across all three
-services.
+replica), mirroring `mongo-db`'s fix: each pod derives its `broker.id` and
+`advertised.listeners` from its own stable per-pod name (`kafka-broker-0`,
+`-1`, `-2`) at container start, rather than one hardcoded identity in
+`values.yaml` (see `kafka.yaml`). Losing any one broker pod no longer stalls
+every producer/consumer across all three services. Each broker also gets
+its own PVC (`kafka.persistence` in `values.yaml`, like `mongodb.persistence`)
+so a pod eviction or node drain doesn't wipe its committed log segments -
+without that, losing more than one broker around the same time could still
+lose data despite the replication settings below.
+
+Two Services back the StatefulSet, not one: `kafka-broker` stays a normal
+ClusterIP Service, unchanged from the single-broker version, and is what
+`spring.kafka.bootstrap-servers=kafka-broker:9092` talks to. A second,
+brand-new `kafka-broker-headless` Service (`clusterIP: None`) exists solely
+to give the StatefulSet's pods their per-pod DNS names for
+`advertised.listeners`. They're kept separate rather than turning
+`kafka-broker` itself headless because `spec.clusterIP` is immutable -
+flipping an already-assigned ClusterIP to `None` on `helm upgrade` would
+fail the upgrade for any release installed before #40.
 
 `kafka.defaultReplicationFactor` (3) and `kafka.minInsyncReplicas` (2) in
 `values.yaml` are broker-level defaults applied to auto-created topics

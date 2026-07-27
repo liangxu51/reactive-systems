@@ -6,7 +6,7 @@ metadata:
     app: kafka-broker
     {{- include "reactive-systems.labels" . | nindent 4 }}
 spec:
-  serviceName: {{ .Values.kafka.serviceName }}
+  serviceName: {{ .Values.kafka.headlessServiceName }}
   replicas: {{ .Values.kafka.replicaCount }}
   selector:
     matchLabels:
@@ -44,12 +44,13 @@ spec:
               POD_NAME=$(hostname)
               export KAFKA_BROKER_ID=${POD_NAME##*-}
               # Each broker must advertise its OWN stable per-pod DNS name
-              # (from the headless Service below), not the shared service
-              # name - otherwise every broker's metadata response points
-              # clients at the same address and only one of the three is
-              # ever actually reachable. Same reasoning as mongo-db's
-              # per-pod host list in mongodb.yaml.
-              export KAFKA_ADVERTISED_LISTENERS="PLAINTEXT://${POD_NAME}.{{ .Values.kafka.serviceName }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.kafka.port }}"
+              # (from the headless governing Service below - NOT the
+              # client-facing kafka-broker Service, which round-robins
+              # across all pods), or every broker's metadata response
+              # points clients at the same address and only one of the
+              # three is ever actually reachable. Same reasoning as
+              # mongo-db's per-pod host list in mongodb.yaml.
+              export KAFKA_ADVERTISED_LISTENERS="PLAINTEXT://${POD_NAME}.{{ .Values.kafka.headlessServiceName }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.kafka.port }}"
               exec /etc/confluent/docker/run
           env:
             - name: KAFKA_ZOOKEEPER_CONNECT
@@ -64,8 +65,16 @@ spec:
               value: "{{ .Values.kafka.defaultReplicationFactor }}"
             - name: KAFKA_MIN_INSYNC_REPLICAS
               value: "{{ .Values.kafka.minInsyncReplicas }}"
+            # Explicit rather than relying on the image's own default, so
+            # the volumeMount below is guaranteed to be where the broker
+            # actually writes its log segments.
+            - name: KAFKA_LOG_DIRS
+              value: /var/lib/kafka/data
           ports:
             - containerPort: {{ .Values.kafka.port }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/kafka/data
           readinessProbe:
             tcpSocket:
               port: {{ .Values.kafka.port }}
@@ -75,6 +84,25 @@ spec:
             tcpSocket:
               port: {{ .Values.kafka.port }}
             initialDelaySeconds: 30
+  {{- if not .Values.kafka.persistence.enabled }}
+      volumes:
+        - name: data
+          emptyDir: {}
+  {{- end }}
+  {{- if .Values.kafka.persistence.enabled }}
+  # One PVC per broker (not a single shared PVC) - each broker's log
+  # segments are its own, not shared state, same reasoning as mongo-db's
+  # volumeClaimTemplates.
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ .Values.kafka.persistence.size }}
+  {{- end }}
 ---
 apiVersion: v1
 kind: Service
@@ -84,14 +112,35 @@ metadata:
     app: kafka-broker
     {{- include "reactive-systems.labels" . | nindent 4 }}
 spec:
+  # Normal ClusterIP (unchanged from the single-broker version) - this is
+  # what spring.kafka.bootstrap-servers=kafka-broker:9092 talks to. Kafka
+  # only needs ANY one reachable broker to bootstrap: it returns full
+  # cluster metadata (including every broker's real advertised address from
+  # KAFKA_ADVERTISED_LISTENERS above), and the client then connects
+  # directly to whichever broker(s) it actually needs. Per-pod addressing
+  # for the brokers themselves is handled by the separate headless Service
+  # below instead of turning this one headless, since spec.clusterIP is
+  # immutable and doing that here would break `helm upgrade` on any release
+  # installed before #40.
+  selector:
+    app: kafka-broker
+  ports:
+    - port: {{ .Values.kafka.port }}
+      targetPort: {{ .Values.kafka.port }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.kafka.headlessServiceName }}
+  labels:
+    app: kafka-broker
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
   # Headless (clusterIP: None): required for a StatefulSet to give each pod
-  # its own stable per-pod DNS name (kafka-broker-0.kafka-broker...), which
-  # KAFKA_ADVERTISED_LISTENERS above relies on. Client bootstrapping (
-  # spring.kafka.bootstrap-servers=kafka-broker:9092) still works fine
-  # against a headless service - any one resolved broker answers the
-  # initial connection with full cluster metadata (including every broker's
-  # real advertised address), and the client then talks directly to
-  # whichever broker(s) it actually needs.
+  # its own stable per-pod DNS name (kafka-broker-0.kafka-broker-headless...),
+  # which KAFKA_ADVERTISED_LISTENERS above relies on. A brand-new resource,
+  # not a mutation of the pre-existing kafka-broker Service, so it carries
+  # no upgrade risk.
   clusterIP: None
   selector:
     app: kafka-broker
