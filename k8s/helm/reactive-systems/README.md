@@ -1,8 +1,11 @@
 # reactive-systems Helm chart (minikube)
 
-Deploys the same pipeline as `docker-compose.yml` (Zookeeper, Kafka, MongoDB,
+Deploys the same pipeline as `docker-compose.yml` (Kafka, MongoDB,
 `order-service`, `inventory-service`, `shipping-service`, `frontend`) to a
-local minikube cluster.
+local minikube cluster. Kafka runs Zookeeper-less "KRaft" mode here (see
+"Kafka KRaft migration" below) rather than `docker-compose.yml`'s
+Zookeeper-based setup, so there's no separate Zookeeper component in this
+chart.
 
 > ⚠️ **Demo only — not for production.** These services have no authentication or authorization; `GET /api/orders` exposes all order data (including customer PII) to any caller. Add auth and scope data access before any real deployment.
 
@@ -250,6 +253,49 @@ blocks until 2 of 3 replicas have the write, not just the leader.
 >   --bootstrap-server localhost:9092 --entity-type topics --entity-name orders \
 >   --alter --add-config min.insync.replicas=2
 > ```
+
+## Kafka KRaft migration (#41)
+
+There is no `zookeeper` Deployment/Service in this chart anymore. `kafka-broker`
+runs Zookeeper-less "KRaft" mode instead: each broker also acts as a
+controller (`KAFKA_PROCESS_ROLES=broker,controller` - a real production
+deployment would usually split those into a separate, smaller controller
+quorum, but that's unwarranted complexity at 3 nodes) and the cluster
+replicates its own metadata log via Raft rather than depending on an
+external Zookeeper ensemble - one less stateful dependency, and one less
+thing needing its own HA/backup story. `docker-compose.yml` is untouched
+and still runs Zookeeper-mode Kafka, matching how #40's broker HA fix
+also only touched this Helm chart.
+
+A `kafka-cluster-id` ConfigMap (`kafka-cluster-id.yaml`) holds the
+cluster's KRaft ID, generated once and persisted across `helm upgrade`
+via `lookup` - the same pattern as `mongo-credentials` in
+`mongo-secret.yaml`. This has to stay stable forever: once a broker has
+formatted its log directory with a given cluster ID, starting it with a
+different one makes it refuse to join, since it looks like an entirely
+different cluster.
+
+> ⚠️ **Not an in-place upgrade for an existing Zookeeper-mode release.**
+> Zookeeper-mode brokers keep no metadata log on local disk at all (it all
+> lives in Zookeeper); KRaft-mode brokers require one, formatted fresh via
+> `kafka-storage.sh format`. The two are fundamentally incompatible on-disk
+> - there's no config flag that converts one into the other in place, and
+> this chart doesn't implement Kafka's own early-access ZooKeeper-to-KRaft
+> online migration tooling (a much larger undertaking, and overkill for a
+> demo project). Upgrading an existing release onto this version requires
+> wiping the `kafka-broker` PVCs first, which drops whatever's currently
+> in the `orders` topic (any in-flight order events) and `__consumer_offsets`
+> (every service's consumer group progress):
+>
+> ```bash
+> helm upgrade reactive-systems k8s/helm/reactive-systems -n reactive-systems  # rolls out the new StatefulSet/ConfigMap first
+> kubectl scale statefulset kafka-broker -n reactive-systems --replicas=0
+> kubectl delete pvc -n reactive-systems -l app=kafka-broker
+> kubectl scale statefulset kafka-broker -n reactive-systems --replicas=3
+> ```
+>
+> Do this during a lull in traffic - there's no way to preserve in-flight
+> messages across the cutover.
 
 ## Fixed: shipping-service Order.shippingDate bug
 

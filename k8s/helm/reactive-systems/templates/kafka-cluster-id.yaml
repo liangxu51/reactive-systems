@@ -1,0 +1,23 @@
+# KRaft's cluster ID must be generated once and never change: once any
+# broker has formatted its log directory with a given cluster ID (see
+# kafka.yaml), starting it with a different one makes it refuse to join -
+# it looks like an entirely different cluster. Generated here (not
+# committed to values.yaml) and persisted across `helm upgrade` via
+# `lookup`, the same pattern as mongo-credentials in mongo-secret.yaml.
+#
+# Kafka's Uuid class requires this in the exact format `kafka-storage.sh
+# random-uuid` itself produces: 16 random bytes, base64 URL-safe encoded,
+# no padding - a plain UUID string with dashes, or standard base64 with
+# +/ characters, both fail its validation. randAlphaNum 16 is 16 raw ASCII
+# bytes (128 bits, matching a UUID); b64enc only has the standard alphabet
+# in Sprig, so it's converted to URL-safe by hand (+ -> -, / -> _) after
+# stripping padding.
+{{- $existing := lookup "v1" "ConfigMap" .Release.Namespace "kafka-cluster-id" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-cluster-id
+  labels:
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+data:
+  cluster-id: {{ or (dig "data" "cluster-id" "" $existing) (randAlphaNum 16 | b64enc | trimSuffix "==" | replace "+" "-" | replace "/" "_") }}
