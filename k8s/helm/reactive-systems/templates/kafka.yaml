@@ -33,7 +33,7 @@ spec:
         - name: kafka-broker
           image: {{ .Values.kafka.image }}
           # cp-kafka's own entrypoint (/etc/confluent/docker/run) only reads
-          # env vars, but broker.id and advertised.listeners must be unique
+          # env vars, but node.id and advertised.listeners must be unique
           # per broker - a StatefulSet's stable per-pod name (kafka-broker-0,
           # -1, -2, ...) already gives us that, so derive both from it here
           # instead of hardcoding one broker's identity into values.yaml.
@@ -42,21 +42,47 @@ spec:
             - -c
             - |
               POD_NAME=$(hostname)
-              export KAFKA_BROKER_ID=${POD_NAME##*-}
+              export KAFKA_NODE_ID=${POD_NAME##*-}
               # Each broker must advertise its OWN stable per-pod DNS name
               # (from the headless governing Service below - NOT the
               # client-facing kafka-broker Service, which round-robins
               # across all pods), or every broker's metadata response
               # points clients at the same address and only one of the
               # three is ever actually reachable. Same reasoning as
-              # mongo-db's per-pod host list in mongodb.yaml.
+              # mongo-db's per-pod host list in mongodb.yaml. Deliberately
+              # excludes the CONTROLLER listener below - that's internal
+              # Raft traffic between brokers, never something a client
+              # connects to.
               export KAFKA_ADVERTISED_LISTENERS="PLAINTEXT://${POD_NAME}.{{ .Values.kafka.headlessServiceName }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.kafka.port }}"
               exec /etc/confluent/docker/run
           env:
-            - name: KAFKA_ZOOKEEPER_CONNECT
-              value: "{{ .Values.zookeeper.serviceName }}:{{ .Values.zookeeper.clientPort }}"
+            # KRaft mode (issue #41): this cluster has no Zookeeper -
+            # brokers replicate their own metadata log via Raft instead.
+            # "broker,controller" (not just "broker") is the combined-role
+            # mode appropriate at this scale - a real production deployment
+            # would usually run a separate, smaller controller quorum, but
+            # that's unwarranted complexity for a 3-node cluster.
+            - name: KAFKA_PROCESS_ROLES
+              value: "broker,controller"
+            - name: CLUSTER_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: kafka-cluster-id
+                  key: cluster-id
+            # Every controller-eligible node (all 3, in combined mode),
+            # listed identically on every broker - unlike
+            # KAFKA_ADVERTISED_LISTENERS above, this is the same value
+            # everywhere, so it's fully computable at template-render time
+            # from replicaCount rather than needing each pod's own runtime
+            # hostname.
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: "{{ range $i := until (int .Values.kafka.replicaCount) }}{{ if $i }},{{ end }}{{ $i }}@kafka-broker-{{ $i }}.{{ $.Values.kafka.headlessServiceName }}.{{ $.Release.Namespace }}.svc.cluster.local:{{ $.Values.kafka.controllerPort }}{{ end }}"
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: "CONTROLLER"
+            - name: KAFKA_LISTENERS
+              value: "PLAINTEXT://0.0.0.0:{{ .Values.kafka.port }},CONTROLLER://0.0.0.0:{{ .Values.kafka.controllerPort }}"
             - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
-              value: "PLAINTEXT:PLAINTEXT"
+              value: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT"
             - name: KAFKA_INTER_BROKER_LISTENER_NAME
               value: "PLAINTEXT"
             - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
@@ -67,11 +93,13 @@ spec:
               value: "{{ .Values.kafka.minInsyncReplicas }}"
             # Explicit rather than relying on the image's own default, so
             # the volumeMount below is guaranteed to be where the broker
-            # actually writes its log segments.
+            # actually writes its log segments (and its KRaft metadata log
+            # - there's no separate log.dirs for that in combined mode).
             - name: KAFKA_LOG_DIRS
               value: /var/lib/kafka/data
           ports:
             - containerPort: {{ .Values.kafka.port }}
+            - containerPort: {{ .Values.kafka.controllerPort }}
           volumeMounts:
             - name: data
               mountPath: /var/lib/kafka/data
@@ -145,5 +173,12 @@ spec:
   selector:
     app: kafka-broker
   ports:
-    - port: {{ .Values.kafka.port }}
+    - name: broker
+      port: {{ .Values.kafka.port }}
       targetPort: {{ .Values.kafka.port }}
+    # Raft consensus traffic between controller-eligible nodes
+    # (KAFKA_CONTROLLER_QUORUM_VOTERS above resolves each peer through
+    # this same headless Service's per-pod DNS names).
+    - name: controller
+      port: {{ .Values.kafka.controllerPort }}
+      targetPort: {{ .Values.kafka.controllerPort }}

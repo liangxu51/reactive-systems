@@ -75,12 +75,6 @@ api:
     # templates/api-secret.yaml) rather than living here in plain values.
     username: admin
 
-zookeeper:
-  image: confluentinc/cp-zookeeper:latest
-  serviceName: zookeeper
-  clientPort: 2181
-  tickTime: 2000
-
 kafka:
   image: confluentinc/cp-kafka:7.4.0
   # Matches the hostname baked into application-docker.properties. Stays a
@@ -95,6 +89,11 @@ kafka:
   # for KAFKA_ADVERTISED_LISTENERS, without touching kafka-broker itself.
   headlessServiceName: kafka-broker-headless
   port: 9092
+  # KRaft's inter-controller Raft consensus port (issue #41) - internal
+  # traffic between broker/controller-role nodes only, never something a
+  # client connects to. Zookeeper (and its own client/peer ports) is gone
+  # entirely now that brokers replicate their own metadata log instead.
+  controllerPort: 9093
   # 3 brokers (StatefulSet, see kafka.yaml) so losing any one broker no
   # longer stalls every producer/consumer across all three services - see
   # issue #40. broker.id is derived per-pod from the StatefulSet ordinal
