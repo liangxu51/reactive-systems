@@ -17,7 +17,7 @@ public class OrderProducer {
 
     public void sendMessage(Order order) {
         log.info("Order processed to dispatch: {}", order);
-        this.kafkaTemplate.send("orders", order);
+        this.kafkaTemplate.send("orders", order.getId().toHexString(), order);
     }
 
 }
