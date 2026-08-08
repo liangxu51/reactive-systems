@@ -31,6 +31,12 @@ public class KafkaConsumerConfig {
         ConcurrentKafkaListenerContainerFactory<Object, Object> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.setCommonErrorHandler(kafkaErrorHandler);
+        // Matches the "orders" topic's 6 partitions (#43) - each of these threads gets its
+        // own partition assignment, so a single order-service pod can process up to 6
+        // orders' worth of saga messages concurrently instead of one poll loop handling
+        // every partition serially. Keep this <= partition count; extra threads beyond
+        // that would just sit idle with no partition to claim.
+        factory.setConcurrency(6);
         return factory;
     }
 }
