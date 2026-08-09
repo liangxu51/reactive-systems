@@ -297,6 +297,67 @@ different cluster.
 > Do this during a lull in traffic - there's no way to preserve in-flight
 > messages across the cutover.
 
+## Kafka consumer lag monitoring (#44)
+
+`kafka-lag-exporter` (a `Deployment`, see `kafka-lag-exporter.yaml`) polls
+each consumer group's committed offsets against the brokers' own
+log-end-offsets and exposes the difference as Prometheus metrics on port
+8000. This covers every consumer group in the cluster - `orders`,
+`orders-vt`, `inventory`, `shipping` - without any app-side changes, which
+matters because `shipping-service` has no HTTP port of its own to scrape
+(see the note above). `order-service`, `order-service-vt`, and
+`inventory-service` additionally expose their own JVM/HTTP metrics at
+`/actuator/prometheus` (via `spring-boot-starter-actuator` +
+`micrometer-registry-prometheus`), behind the same shared HTTP Basic
+credential as every other endpoint on those services.
+
+A bare-bones single-replica `prometheus` `Deployment` (see `prometheus.yaml`)
+scrapes both: `kafka-lag-exporter:8000/metrics` directly, and each web-enabled
+service's `/actuator/prometheus`, authenticating with the `api-credentials`
+Secret's password via a mounted `password_file` rather than embedding it in
+the scrape config. It also evaluates one alerting rule,
+`KafkaConsumerGroupLagHigh`, on `kafka_consumergroup_group_max_lag` (each
+group's worst-lagging partition) - **no Alertmanager is deployed**, so a
+firing alert only shows up on Prometheus's own `/alerts` page, it isn't
+routed or paged anywhere. Wire up Alertmanager separately (see #55) if you
+need real delivery.
+
+Reach the UI with:
+
+```bash
+kubectl port-forward -n reactive-systems svc/prometheus 9090:9090
+```
+
+Then open `http://localhost:9090/alerts` (rule state) or query
+`kafka_consumergroup_group_max_lag` / `kafka_consumergroup_group_lag_seconds`
+directly.
+
+Three things worth knowing, found by actually deploying this to a live
+cluster rather than just rendering the chart:
+
+- **`kafka-lag-exporter`'s bundled JVM crashes on some hosts without
+  `-XX:-UseContainerSupport`** (see `kafkaLagExporter`'s env in
+  `kafka-lag-exporter.yaml`) - a JDK bug where cgroup v2 detection NPEs on
+  certain container runtime/kernel combinations. Without the flag, the JVM
+  process stays alive (looks "Running" to Kubernetes) even though its
+  actor system - and the metrics endpoint with it - already crashed on
+  startup; the TCP readiness/liveness probes can pass transiently on a
+  leftover socket before failing, so this failure mode is easy to miss from
+  `kubectl get pods` alone. Check `kubectl logs` for "guardian failed,
+  shutting down system" if lag metrics ever go missing.
+- **`prometheus`'s Deployment uses `strategy: Recreate`, not the default
+  `RollingUpdate`.** With a single replica backed by a `ReadWriteOnce` PVC,
+  `RollingUpdate` starts the new pod before killing the old one; on
+  minikube's storage class both pods were able to mount the volume at once,
+  and the new one crash-looped on Prometheus's own TSDB lock file
+  ("resource temporarily unavailable") still held by the pod being replaced.
+- **Both `prometheus.yaml` and `kafka-lag-exporter.yaml` set a
+  `checksum/config` pod annotation** hashing the values that feed their
+  ConfigMaps. Without it, `helm upgrade` updates the ConfigMap in place but
+  neither Kubernetes nor Prometheus restarts/reloads on that alone, so a
+  running pod keeps serving its old config indefinitely after an upgrade
+  that only touched `prometheus.yml`/`kafka-lag-alerts.yml`.
+
 ## Fixed: shipping-service Order.shippingDate bug
 
 Previously, once an order reached `PREPARE_SHIPPING`, `shipping-service`

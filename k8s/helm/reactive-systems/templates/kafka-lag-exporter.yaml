@@ -1,0 +1,115 @@
+# Consumer lag monitoring (#44). kafka-lag-exporter polls each consumer
+# group's committed offsets (__consumer_offsets) against the brokers' own
+# log-end-offsets and exposes the difference as Prometheus metrics - this
+# works for every consumer group in the cluster ("orders", "orders-vt",
+# "inventory", "shipping") without any of the app services needing to expose
+# anything themselves, which matters for shipping-service since it has no
+# HTTP port to scrape (see README's "shipping-service has no webflux" note).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-lag-exporter-config
+  labels:
+    app: kafka-lag-exporter
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+data:
+  application.conf: |
+    kafka-lag-exporter {
+      port = {{ .Values.kafkaLagExporter.port }}
+      poll-interval = {{ .Values.kafkaLagExporter.pollIntervalSeconds }} seconds
+      lookup-table-size = {{ .Values.kafkaLagExporter.lookupTableSize }}
+      clusters = [
+        {
+          name = "reactive-systems"
+          bootstrap-brokers = "{{ .Values.kafka.serviceName }}:{{ .Values.kafka.port }}"
+        }
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-lag-exporter
+  labels:
+    app: kafka-lag-exporter
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka-lag-exporter
+  template:
+    metadata:
+      labels:
+        app: kafka-lag-exporter
+      annotations:
+        # See prometheus.yaml's checksum/config annotation for why this is
+        # needed - a ConfigMap-only change otherwise leaves the running pod
+        # on its old config indefinitely. Hashes the values feeding this
+        # file's ConfigMap, not the file itself (self-including via
+        # $.Template.BasePath recurses infinitely).
+        checksum/config: {{ dict "kafkaLagExporter" .Values.kafkaLagExporter "kafka" .Values.kafka | toYaml | sha256sum }}
+    spec:
+      initContainers:
+        - name: wait-for-kafka
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z {{ .Values.kafka.serviceName }} {{ .Values.kafka.port }}; do
+                echo waiting for kafka-broker; sleep 2;
+              done
+      volumes:
+        - name: config
+          configMap:
+            name: kafka-lag-exporter-config
+      containers:
+        - name: kafka-lag-exporter
+          image: "{{ .Values.kafkaLagExporter.image }}"
+          # sbt-native-packager's launch script only picks up
+          # /opt/docker/conf/application.conf automatically if that path
+          # exists at container start - the explicit -Dconfig.file flag
+          # doesn't depend on that convention holding across image versions.
+          #
+          # -XX:-UseContainerSupport works around a JDK bug where the bundled
+          # JVM's cgroup v2 detection NPEs on some container runtimes/kernels
+          # (java.lang.management.ManagementFactory.getOperatingSystemMXBean()
+          # -> jdk.internal.platform.CgroupV2Subsystem.getInstance() with a
+          # null mount point) - confirmed live on this cluster: the process
+          # stayed alive with its actor system (and the Prometheus HTTP
+          # listener with it) already crashed, so the TCP readiness/liveness
+          # probes below could pass transiently even though nothing was
+          # actually serving metrics. Disabling container-aware resource
+          # detection skips that code path entirely; harmless here since
+          # each pod already gets exactly one container to itself.
+          env:
+            - name: JAVA_OPTS
+              value: "-Dconfig.file=/opt/docker/conf/application.conf -XX:-UseContainerSupport"
+          volumeMounts:
+            - name: config
+              mountPath: /opt/docker/conf
+          ports:
+            - containerPort: {{ .Values.kafkaLagExporter.port }}
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.kafkaLagExporter.port }}
+            initialDelaySeconds: 15
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.kafkaLagExporter.port }}
+            initialDelaySeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-lag-exporter
+  labels:
+    app: kafka-lag-exporter
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: kafka-lag-exporter
+  ports:
+    - port: {{ .Values.kafkaLagExporter.port }}
+      targetPort: {{ .Values.kafkaLagExporter.port }}

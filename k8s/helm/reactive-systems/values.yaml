@@ -158,6 +158,38 @@ shippingService:
     tag: ""
   replicaCount: 1
 
+# Consumer lag monitoring (#44) - kafka-lag-exporter reads committed offsets
+# and log-end-offsets straight from the brokers/__consumer_offsets, so it
+# covers every consumer group's lag (including shipping-service's, which has
+# no HTTP port of its own to scrape) without needing any app-side changes.
+kafkaLagExporter:
+  image: seglo/kafka-lag-exporter:0.8.2
+  port: 8000
+  pollIntervalSeconds: 30
+  # How many poll cycles of offset history to keep per partition, used to
+  # estimate lag in time (kafka_consumergroup_group_lag_seconds) as well as
+  # message count - 60 * pollIntervalSeconds (30s) = 30 minutes of history.
+  lookupTableSize: 60
+
+# Bare-bones single-replica Prometheus (#44) - no Alertmanager, no remote
+# storage, no HA. It scrapes kafka-lag-exporter plus each web-enabled
+# service's own /actuator/prometheus, and evaluates one alerting rule
+# (kafka-lag-alerts.yml, see prometheus.yaml) - "evaluates", not "routes":
+# with no Alertmanager configured, a firing alert is only visible on
+# Prometheus's own /alerts page, not paged anywhere. Wire up Alertmanager
+# separately (see #55) if that's needed.
+prometheus:
+  image: prom/prometheus:v2.53.0
+  port: 9090
+  scrapeIntervalSeconds: 30
+  persistence:
+    enabled: true
+    size: 2Gi
+  # Sustained per-partition lag (messages) before KafkaConsumerGroupLagHigh
+  # fires - picked as "clearly not normal for this demo's traffic", not
+  # derived from a real throughput SLA. Tune to your own workload.
+  lagAlertThreshold: 500
+
 frontend:
   image:
     repository: frontend
