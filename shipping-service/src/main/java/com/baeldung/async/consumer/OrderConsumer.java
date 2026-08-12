@@ -2,6 +2,7 @@ package com.baeldung.async.consumer;
 
 import java.io.IOException;
 
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
@@ -25,22 +26,41 @@ public class OrderConsumer {
 
     @KafkaListener(topics = "orders", groupId = "shipping")
     public void consume(Order order) throws IOException {
-        log.info("Order received to process: {}", order);
-        if (OrderStatus.PREPARE_SHIPPING.equals(order.getOrderStatus())) {
-            shippingService.handleOrder(order)
-                .doOnSuccess(o -> {
-                    log.info("Order processed succesfully.");
-                    orderProducer.sendMessage(order.setOrderStatus(OrderStatus.SHIPPING_SUCCESS)
-                        .setShippingDate(o.getShippingDate()));
-                })
-                .doOnError(e -> {
-                    if (log.isErrorEnabled())
-                        log.error("Order failed to process: " + e);
-                    orderProducer.sendMessage(order.setOrderStatus(OrderStatus.SHIPPING_FAILURE)
-                        .setResponseMessage(e.getMessage()));
-                })
-                .subscribe(o -> {
-                }, e -> log.error("Failed to process order {} for status {}", order.getId(), order.getOrderStatus(), e));
+        String orderId = order.getId().toHexString();
+        // Reactor's automatic context propagation (spring.reactor.context-propagation=auto,
+        // #46) turned out NOT to carry MDC into doOnSuccess/doOnError/subscribe callbacks -
+        // confirmed live by deploying and grepping raw log output: setting MDC once here left
+        // "orderId" missing from every line those callbacks emit, even on a proper Reactor
+        // operator (doOnSuccess), not just the terminal subscribe(). Each callback below sets
+        // it again itself instead of relying on inheritance. This outer scope still covers the
+        // "Order received" line and whatever handleOrder() itself logs while synchronously
+        // building the Mono chain, before subscribe() hands off to Mongo's own driver threads.
+        try (var ignored = MDC.putCloseable("orderId", orderId)) {
+            log.info("Order received to process: {}", order);
+            if (OrderStatus.PREPARE_SHIPPING.equals(order.getOrderStatus())) {
+                shippingService.handleOrder(order)
+                    .doOnSuccess(o -> {
+                        try (var ignored2 = MDC.putCloseable("orderId", orderId)) {
+                            log.info("Order processed succesfully.");
+                            orderProducer.sendMessage(order.setOrderStatus(OrderStatus.SHIPPING_SUCCESS)
+                                .setShippingDate(o.getShippingDate()));
+                        }
+                    })
+                    .doOnError(e -> {
+                        try (var ignored2 = MDC.putCloseable("orderId", orderId)) {
+                            if (log.isErrorEnabled())
+                                log.error("Order failed to process: " + e);
+                            orderProducer.sendMessage(order.setOrderStatus(OrderStatus.SHIPPING_FAILURE)
+                                .setResponseMessage(e.getMessage()));
+                        }
+                    })
+                    .subscribe(o -> {
+                    }, e -> {
+                        try (var ignored2 = MDC.putCloseable("orderId", orderId)) {
+                            log.error("Failed to process order {} for status {}", order.getId(), order.getOrderStatus(), e);
+                        }
+                    });
+            }
         }
     }
 }

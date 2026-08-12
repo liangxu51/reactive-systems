@@ -3,6 +3,7 @@ package com.baeldung.async.consumer;
 import java.util.Map;
 import java.util.Set;
 
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
@@ -37,22 +38,36 @@ public class OrderConsumer {
 
     @KafkaListener(topics = "orders", groupId = "orders")
     public void consume(Order order) {
-        log.info("Order received to process: {}", order);
+        String orderId = order.getId().toHexString();
+        // Reactor's automatic context propagation (spring.reactor.context-propagation=auto,
+        // #46) turned out NOT to carry MDC into .subscribe()'s callbacks - confirmed live by
+        // deploying and grepping raw log output: setting MDC once here and calling .subscribe()
+        // in scope still left "orderId" missing from every line the callbacks below emit.
+        // Each callback below sets it again itself instead of relying on inheritance.
+        try (var ignored = MDC.putCloseable("orderId", orderId)) {
+            log.info("Order received to process: {}", order);
+        }
         orderRepository.findById(order.getId())
             .map(o -> o.setOrderStatus(order.getOrderStatus())
                 .setResponseMessage(order.getResponseMessage()))
             .flatMap(orderRepository::save)
             .subscribe(
                 saved -> {
-                    if (UNRECOVERABLE_STATUSES.contains(order.getOrderStatus())) {
-                        log.error("Order {} reached unrecoverable status {} with no compensating action: {}",
-                            order.getId(), order.getOrderStatus(), order.getResponseMessage());
-                    }
-                    OrderStatus next = NEXT_STATUS.get(order.getOrderStatus());
-                    if (next != null) {
-                        orderProducer.sendMessage(saved.setOrderStatus(next));
+                    try (var ignored = MDC.putCloseable("orderId", orderId)) {
+                        if (UNRECOVERABLE_STATUSES.contains(order.getOrderStatus())) {
+                            log.error("Order {} reached unrecoverable status {} with no compensating action: {}",
+                                order.getId(), order.getOrderStatus(), order.getResponseMessage());
+                        }
+                        OrderStatus next = NEXT_STATUS.get(order.getOrderStatus());
+                        if (next != null) {
+                            orderProducer.sendMessage(saved.setOrderStatus(next));
+                        }
                     }
                 },
-                err -> log.error("Failed to process order {} for status {}", order.getId(), order.getOrderStatus(), err));
+                err -> {
+                    try (var ignored = MDC.putCloseable("orderId", orderId)) {
+                        log.error("Failed to process order {} for status {}", order.getId(), order.getOrderStatus(), err);
+                    }
+                });
     }
 }

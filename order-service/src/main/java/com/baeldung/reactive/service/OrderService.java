@@ -2,6 +2,7 @@ package com.baeldung.reactive.service;
 
 import java.util.stream.Collectors;
 
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -35,8 +36,12 @@ public class OrderService {
             })
             .flatMap(orderRepository::save)
             .doOnNext(o -> {
-                o.setOrderStatus(OrderStatus.INITIATION_SUCCESS);
-                orderProducer.sendMessage(o);
+                // Not known until the save above assigns it, so this is the earliest
+                // point in the chain MDC can carry the order ID (#47).
+                try (var ignored = MDC.putCloseable("orderId", o.getId().toHexString())) {
+                    o.setOrderStatus(OrderStatus.INITIATION_SUCCESS);
+                    orderProducer.sendMessage(o);
+                }
             })
             .onErrorResume(err -> {
                 return Mono.just(order.setOrderStatus(OrderStatus.FAILURE)
