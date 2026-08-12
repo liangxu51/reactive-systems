@@ -1,0 +1,76 @@
+# Distributed tracing across the Kafka saga (#46). A single jaegertracing/
+# all-in-one Deployment: collector, in-memory storage, query API, and UI all
+# in one process - order-service, order-service-vt, inventory-service, and
+# shipping-service each export spans to it directly over OTLP (see each
+# service's application-docker.properties), and Spring Kafka's Observation
+# support propagates the trace context between them through the "orders"
+# record's own headers, so a single order's journey across all three saga
+# hops shows up as one trace.
+#
+# Storage is in-memory (Jaeger's default when SPAN_STORAGE_TYPE isn't set) -
+# no PVC, unlike prometheus.yaml. Traces are short-lived debugging data you
+# pull up while a saga is stuck, not something this demo needs to retain
+# across a pod restart the way metrics history or alert state is; wire up
+# Badger/Elasticsearch/Cassandra storage instead if that changes.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger
+  labels:
+    app: jaeger
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jaeger
+  template:
+    metadata:
+      labels:
+        app: jaeger
+    spec:
+      containers:
+        - name: jaeger
+          image: "{{ .Values.jaeger.image }}"
+          env:
+            # Explicit rather than relying on the image's own default, so a
+            # future image bump can't silently disable the receiver every
+            # exporter here actually targets.
+            - name: COLLECTOR_OTLP_ENABLED
+              value: "true"
+          ports:
+            - name: otlp-grpc
+              containerPort: {{ .Values.jaeger.otlpGrpcPort }}
+            - name: otlp-http
+              containerPort: {{ .Values.jaeger.otlpHttpPort }}
+            - name: ui
+              containerPort: {{ .Values.jaeger.uiPort }}
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.jaeger.uiPort }}
+            initialDelaySeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.jaeger.uiPort }}
+            initialDelaySeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger
+  labels:
+    app: jaeger
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: jaeger
+  ports:
+    - name: otlp-grpc
+      port: {{ .Values.jaeger.otlpGrpcPort }}
+      targetPort: {{ .Values.jaeger.otlpGrpcPort }}
+    - name: otlp-http
+      port: {{ .Values.jaeger.otlpHttpPort }}
+      targetPort: {{ .Values.jaeger.otlpHttpPort }}
+    - name: ui
+      port: {{ .Values.jaeger.uiPort }}
+      targetPort: {{ .Values.jaeger.uiPort }}

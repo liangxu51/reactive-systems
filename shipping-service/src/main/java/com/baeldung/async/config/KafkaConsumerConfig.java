@@ -1,5 +1,6 @@
 package com.baeldung.async.config;
 
+import org.springframework.boot.kafka.autoconfigure.ConcurrentKafkaListenerContainerFactoryConfigurer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
@@ -27,9 +28,17 @@ public class KafkaConsumerConfig {
 
     @Bean
     public ConcurrentKafkaListenerContainerFactory<Object, Object> kafkaListenerContainerFactory(
+        ConcurrentKafkaListenerContainerFactoryConfigurer configurer,
         ConsumerFactory<Object, Object> consumerFactory, DefaultErrorHandler kafkaErrorHandler) {
         ConcurrentKafkaListenerContainerFactory<Object, Object> factory = new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(consumerFactory);
+        // Applies every spring.kafka.listener.* property (including
+        // observation-enabled, #46) to this factory the same way Spring
+        // Boot's own autoconfigured bean would - a hand-built factory (#19)
+        // otherwise silently ignores all of them. Confirmed live: without
+        // this, spring.kafka.listener.observation-enabled=true had no
+        // effect and @KafkaListener methods created no spans at all, with
+        // no error anywhere.
+        configurer.configure(factory, consumerFactory);
         factory.setCommonErrorHandler(kafkaErrorHandler);
         // Matches the "orders" topic's 6 partitions (#43) - each of these threads gets its
         // own partition assignment, so a single shipping-service pod can process up to 6

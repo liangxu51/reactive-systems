@@ -40,6 +40,32 @@
             <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
         <dependency>
+            <!--
+              Spring Boot 4 splits tracing autoconfiguration out of
+              spring-boot-starter-actuator into its own module, and then
+              splits THAT again: the base spring-boot-micrometer-tracing
+              module (pulled in transitively here) only wires a NoopTracer,
+              silently discarding every span - the OTel bridge and
+              OtlpTracingAutoConfiguration (which wires up
+              management.otlp.tracing.endpoint below) only come from this
+              -opentelemetry module specifically. Confirmed live: with just
+              the base module + micrometer-tracing-bridge-otel on the
+              classpath, the app started cleanly and logged nothing wrong,
+              but Jaeger's /api/services stayed permanently empty - every
+              span was silently going to the no-op tracer instead.
+            -->
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-micrometer-tracing-opentelemetry</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-bridge-otel</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+        </dependency>
+        <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>
