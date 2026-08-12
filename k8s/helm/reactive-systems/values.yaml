@@ -190,6 +190,15 @@ prometheus:
   # derived from a real throughput SLA. Tune to your own workload.
   lagAlertThreshold: 500
 
+# Distributed tracing across the Kafka saga (#46) - single jaegertracing/
+# all-in-one Deployment (collector + in-memory storage + query API + UI),
+# see templates/jaeger.yaml.
+jaeger:
+  image: jaegertracing/all-in-one:1.60
+  otlpGrpcPort: 4317
+  otlpHttpPort: 4318
+  uiPort: 16686
+
 frontend:
   image:
     repository: frontend

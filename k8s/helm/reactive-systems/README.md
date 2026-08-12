@@ -358,6 +358,80 @@ cluster rather than just rendering the chart:
   running pod keeps serving its old config indefinitely after an upgrade
   that only touched `prometheus.yml`/`kafka-lag-alerts.yml`.
 
+## Distributed tracing across the Kafka saga (#46)
+
+`order-service`, `order-service-vt`, `inventory-service`, and
+`shipping-service` all export spans to a single `jaeger` all-in-one
+Deployment (see `jaeger.yaml`) over OTLP. Nothing hand-wires the trace
+context through the "orders" record's headers - Spring Kafka's built-in
+Observation support does it automatically once
+`spring.kafka.template.observation-enabled` /
+`spring.kafka.listener.observation-enabled` are on, because
+`micrometer-tracing-bridge-otel` is on the classpath. That's what makes a
+single order's journey - `order-service` publishes `INITIATION_SUCCESS` ->
+its own consumer republishes `RESERVE_INVENTORY` -> `inventory-service`
+consumes and publishes `INVENTORY_SUCCESS` -> back through `order-service`
+to `shipping-service` and so on - show up as one connected trace instead of
+requiring the order ID to be grepped across three separate log streams.
+
+Reach the UI with:
+
+```bash
+kubectl port-forward -n reactive-systems svc/jaeger 16686:16686
+```
+
+Then open `http://localhost:16686`, pick a service (`order-service`,
+`inventory-service`, or `shipping-service`), and look for a trace with spans
+from more than one of them - that's a saga crossing the Kafka topic.
+
+This module (Spring Boot 4.0.7) turned out to have moved or renamed almost
+everything tracing-related since the Spring Boot 3.x docs most guides are
+written against, and every one of the following was found only by actually
+deploying and checking Jaeger's `/api/services` / `/api/traces`, not by
+reading logs or rendering the chart:
+
+- **`spring-boot-starter-actuator` no longer pulls in tracing
+  autoconfiguration at all**, and the module that does
+  (`spring-boot-micrometer-tracing`) *itself* only wires a `NoopTracer` -
+  the OTel bridge and `OtlpTracingAutoConfiguration` live in a further split,
+  `spring-boot-micrometer-tracing-opentelemetry` (see each service's
+  `pom.xml`). Skipping it produces no error and no log line; spans just
+  silently go to a tracer that discards them, and Jaeger's `/api/services`
+  stays permanently empty.
+- **`management.otlp.tracing.endpoint` is deprecated (`level: error`) as of
+  Boot 4.0.0** in favor of
+  `management.opentelemetry.tracing.export.otlp.endpoint` - the old key
+  isn't rejected or warned about, it's just silently unbound, so the
+  exporter falls back to its own `localhost:4318` default instead of
+  reaching the in-cluster `jaeger` Service. `actuator/beans` was what
+  actually surfaced this (the exporter beans were present and correctly
+  configured except for the endpoint).
+- **`spring.reactor.context-propagation` defaults to `limited`, and `full`
+  isn't a valid value in this version** (only `AUTO`/`LIMITED` - `full` fails
+  binding at startup with a clear error, at least). `limited` doesn't bridge
+  Micrometer's ThreadLocal-based Observation across the thread hops
+  `order-service`/`inventory-service`/`shipping-service` all have between
+  their WebFlux/`@KafkaListener` entry point, the reactive Mongo driver's own
+  callback threads, and the eventual Kafka send - without `auto`, every
+  producer span showed up in Jaeger as its own disconnected root trace
+  instead of a child of whatever triggered it.
+- **The hand-built `kafkaListenerContainerFactory` bean each service defines
+  for dead-letter routing (#19) bypasses Spring Boot's property-driven
+  configuration entirely.** `spring.kafka.listener.observation-enabled=true`
+  has zero effect on a factory built with `new
+  ConcurrentKafkaListenerContainerFactory<>()` directly - no consumer-side
+  span is ever created, with no error anywhere. Fixed by injecting Boot's own
+  `ConcurrentKafkaListenerContainerFactoryConfigurer` and calling
+  `configurer.configure(factory, consumerFactory)` before applying the
+  custom error handler and concurrency (see `KafkaConsumerConfig.java` in
+  each service).
+- **Without `spring.application.name` set, every pod's spans report
+  `service.name=unknown_service`** (OTel's SDK-level default) - the trace
+  itself is still correctly linked end-to-end once the above are fixed, but
+  Jaeger can't tell which span came from which service, which defeats most
+  of the point. One line per service (`spring.application.name=order-service`
+  etc. in `application.properties`) fixes it.
+
 ## Fixed: shipping-service Order.shippingDate bug
 
 Previously, once an order reached `PREPARE_SHIPPING`, `shipping-service`
