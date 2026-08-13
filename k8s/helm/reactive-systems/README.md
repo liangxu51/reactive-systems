@@ -432,6 +432,54 @@ reading logs or rendering the chart:
   of the point. One line per service (`spring.application.name=order-service`
   etc. in `application.properties`) fixes it.
 
+## Structured, correlated logging (#47)
+
+Prometheus metrics were already covered by #44 (`spring-boot-starter-actuator`
++ `micrometer-registry-prometheus` on `order-service`, `order-service-vt`, and
+`inventory-service` - `shipping-service` still has no HTTP port, still
+covered by `kafka-lag-exporter` instead), so this issue's remaining scope was
+just the logging half: switch console output to structured JSON and
+correlate every log line by order ID and trace ID.
+
+All four services set `logging.structured.format.console=ecs` (Elastic
+Common Schema, one of Spring Boot's built-in formats - no extra dependency).
+Every line now looks like:
+
+```json
+{"@timestamp":"...","log":{"level":"INFO","logger":"com.baeldung.async.consumer.OrderConsumer"},"service":{"name":"order-service",...},"message":"Order received to process: ...","traceId":"...","spanId":"...","orderId":"6a7cc251dded54710494b0a9","ecs":{"version":"8.11"}}
+```
+
+`traceId`/`spanId` come for free once `micrometer-tracing` is on the
+classpath (#46) - Boot's ECS formatter picks up whatever Micrometer's
+current span put in MDC automatically. `orderId` doesn't have an equivalent
+automatic source, so each service's `OrderConsumer.consume()` (and, for
+`order-service`, the point in `OrderService.createOrder()` where a new
+order's ID first becomes known) sets it explicitly via
+`MDC.putCloseable("orderId", ...)`. The result: `kubectl logs | grep
+<order-id>` (or a real log aggregator's field filter, once #54 wires one up)
+returns every line touching that order, from every service, without
+correlating by eyeballing free-text order IDs across three separate log
+streams.
+
+Getting the correlation to actually reach every line - not just the first,
+synchronous one - took another live-deployment-only bug:
+
+- **`spring.reactor.context-propagation=auto` (#46) bridges Micrometer's
+  Observation across Reactor's thread hops, but it does NOT bridge MDC**,
+  despite `io.micrometer:context-propagation` shipping a
+  `Slf4jThreadLocalAccessor` seemingly built for exactly this. Registering it
+  with `ContextRegistry.getInstance().registerThreadLocalAccessor(...)`
+  didn't error and didn't help either: confirmed live, `orderId` set once
+  before `.subscribe()` was reliably missing from every line the
+  `.subscribe()`/`.doOnSuccess()`/`.doOnError()` callbacks below it emitted -
+  including on `doOnSuccess`, a proper Reactor operator, not just the
+  terminal `subscribe()`. The fix that actually worked (verified by grepping
+  raw JSON output for a real order ID across all three services, zero
+  missing fields): drop the propagation-based approach entirely and call
+  `MDC.putCloseable("orderId", ...)` again inside every single callback that
+  logs, using the order ID captured in the enclosing closure rather than
+  relying on it being inherited from anywhere.
+
 ## Fixed: shipping-service Order.shippingDate bug
 
 Previously, once an order reached `PREPARE_SHIPPING`, `shipping-service`

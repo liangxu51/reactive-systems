@@ -1,5 +1,6 @@
 package com.baeldung.vt.controller;
 
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,10 +30,14 @@ public class OrderController {
     public Order create(@RequestBody Order order) {
         log.info("Create order invoked with: {}", order);
         Order created = orderService.createOrder(order);
-        if (OrderStatus.FAILURE.equals(created.getOrderStatus())) {
-            throw new RuntimeException("Order processing failed, please try again later. " + created.getResponseMessage());
+        // Not known until createOrder() assigns it, so this is the earliest point
+        // MDC can carry the order ID (#47) - covers the remainder of the request.
+        try (var ignored = MDC.putCloseable("orderId", created.getId().toHexString())) {
+            if (OrderStatus.FAILURE.equals(created.getOrderStatus())) {
+                throw new RuntimeException("Order processing failed, please try again later. " + created.getResponseMessage());
+            }
+            return created;
         }
-        return created;
     }
 
     // Consumed by the Angular reactive demo (Accept: text/event-stream).

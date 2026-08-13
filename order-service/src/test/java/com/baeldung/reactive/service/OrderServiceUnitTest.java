@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 
+import org.bson.types.ObjectId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -42,9 +43,16 @@ class OrderServiceUnitTest {
 
     @BeforeEach
     void setUp() {
+        // A real orderRepository.save() always returns the order with an _id assigned (Mongo
+        // generates one if not already set) - orderService.createOrder()'s .doOnNext() reads
+        // that id for MDC correlation (#47), so the mocked save() below (which just echoes its
+        // argument back) needs a fixture that already reflects that post-save invariant.
+        // setId() isn't part of Order's fluent setter set (see Order.java), hence the separate
+        // statement.
         order = new Order().setLineItems(List.of(
             new LineItem().setQuantity(2),
             new LineItem().setQuantity(0)));
+        order.setId(new ObjectId());
     }
 
     @Test
