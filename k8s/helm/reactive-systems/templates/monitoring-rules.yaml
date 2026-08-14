@@ -1,0 +1,57 @@
+# Alert rules for kube-prometheus-stack's Prometheus Operator (#55).
+# Pod-restart-loops need no rule here - kube-prometheus-stack's
+# defaultRules (values.yaml) already ships KubePodCrashLooping, built on
+# kube-state-metrics' kube_pod_container_status_restarts_total.
+{{- if index .Values "kube-prometheus-stack" "enabled" }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: reactive-systems-alerts
+  labels:
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: kafka-consumer-lag
+      rules:
+        # Migrated from #44's hand-rolled prometheus.yaml (now retired) -
+        # same expression/threshold, now routed through Alertmanager instead
+        # of only ever showing up on Prometheus's own /alerts page.
+        - alert: KafkaConsumerGroupLagHigh
+          expr: kafka_consumergroup_group_max_lag{cluster_name="reactive-systems"} > {{ .Values.monitoringRules.lagAlertThreshold }}
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Consumer group {{`{{ $labels.group }}`}} is falling behind on the orders topic"
+            description: "{{`{{ $labels.group }}`}}'s worst-lagging partition has been over {{ .Values.monitoringRules.lagAlertThreshold }} messages behind for 5+ minutes - check whether it's stuck or under-provisioned."
+    - name: mongodb-replica-set
+      rules:
+        # mongodb_exporter's replset member-state gauge - fires when no
+        # member of rs0 currently reports itself as PRIMARY (state 1),
+        # covering the InvalidReplicaSetConfig failure mode named in #55's
+        # problem statement. Metric name/label set confirmed against a live
+        # mongodb_exporter 0.44 /metrics endpoint before relying on it in a
+        # real deployment - percona/mongodb_exporter's replset collector can
+        # change label names across versions.
+        - alert: MongoReplicaSetNoPrimary
+          expr: sum(mongodb_mongod_replset_member_state{state="PRIMARY"}) == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "MongoDB replica set rs0 has no PRIMARY"
+            description: "No member of rs0 has reported itself as PRIMARY for 2+ minutes - writes are unavailable until a new primary is elected or the set is repaired."
+    - name: kafka-broker-health
+      rules:
+        # kafka_exporter's under-replicated-partition gauge. Metric name
+        # confirmed against a live kafka_exporter v1.7.0 /metrics endpoint
+        # before relying on it in a real deployment.
+        - alert: KafkaBrokerUnderReplicated
+          expr: sum(kafka_topic_partition_under_replicated_partition) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kafka has under-replicated partitions"
+            description: "At least one partition has been under-replicated for 5+ minutes - check for a down/lagging broker (minInsyncReplicas={{ .Values.kafka.minInsyncReplicas }})."
+{{- end }}

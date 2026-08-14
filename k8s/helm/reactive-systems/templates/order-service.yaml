@@ -5,6 +5,11 @@ metadata:
   name: order-service
   labels:
     app: order-service
+    # order-service/order-service-vt are mutually exclusive and share this
+    # same Service name (see order-service-vt.yaml) - this shared label lets
+    # a single ServiceMonitor (see monitoring-servicemonitors.yaml) cover
+    # whichever one is actually enabled.
+    monitoring: order-service
     {{- include "reactive-systems.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.orderService.replicaCount }}
@@ -34,7 +39,8 @@ spec:
             {{- include "reactive-systems.mongoUriEnv" . | nindent 12 }}
             {{- include "reactive-systems.apiAuthEnv" . | nindent 12 }}
           ports:
-            - containerPort: {{ .Values.orderService.containerPort }}
+            - name: http
+              containerPort: {{ .Values.orderService.containerPort }}
           readinessProbe:
             tcpSocket:
               port: {{ .Values.orderService.containerPort }}
@@ -50,11 +56,13 @@ metadata:
   name: order-service
   labels:
     app: order-service
+    monitoring: order-service
     {{- include "reactive-systems.labels" . | nindent 4 }}
 spec:
   selector:
     app: order-service
   ports:
-    - port: {{ .Values.orderService.servicePort }}
+    - name: http
+      port: {{ .Values.orderService.servicePort }}
       targetPort: {{ .Values.orderService.containerPort }}
 {{- end }}

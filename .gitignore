@@ -26,3 +26,9 @@ gha-creds-*.json
 
 # local output from the Playwright MCP server (console logs, page snapshots, screenshots)
 .playwright-mcp/
+
+# Downloaded Helm chart dependency tarballs (#55/#54) - fetched via
+# `helm dependency build`, not committed. Chart.lock (which pins the exact
+# resolved subchart versions) IS committed, same convention as a
+# package-lock.json.
+k8s/helm/reactive-systems/charts/

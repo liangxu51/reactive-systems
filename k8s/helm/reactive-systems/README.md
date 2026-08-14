@@ -50,6 +50,15 @@ e.g. `--set orderService.image.tag=$(git rev-parse --short HEAD)`.
 
 ## 2. Install the chart
 
+Since #55, this chart pulls in `kube-prometheus-stack` as a real Helm
+dependency (see "Centralized monitoring and alerting" below) - fetch it
+first, or `helm install`/`upgrade` fails outright with "found in
+Chart.yaml, but missing in charts/ directory":
+
+```bash
+helm dependency build k8s/helm/reactive-systems
+```
+
 Installed into its own namespace so it doesn't mix with anything else
 already running on the cluster:
 
@@ -311,26 +320,11 @@ matters because `shipping-service` has no HTTP port of its own to scrape
 `micrometer-registry-prometheus`), behind the same shared HTTP Basic
 credential as every other endpoint on those services.
 
-A bare-bones single-replica `prometheus` `Deployment` (see `prometheus.yaml`)
-scrapes both: `kafka-lag-exporter:8000/metrics` directly, and each web-enabled
-service's `/actuator/prometheus`, authenticating with the `api-credentials`
-Secret's password via a mounted `password_file` rather than embedding it in
-the scrape config. It also evaluates one alerting rule,
-`KafkaConsumerGroupLagHigh`, on `kafka_consumergroup_group_max_lag` (each
-group's worst-lagging partition) - **no Alertmanager is deployed**, so a
-firing alert only shows up on Prometheus's own `/alerts` page, it isn't
-routed or paged anywhere. Wire up Alertmanager separately (see #55) if you
-need real delivery.
-
-Reach the UI with:
-
-```bash
-kubectl port-forward -n reactive-systems svc/prometheus 9090:9090
-```
-
-Then open `http://localhost:9090/alerts` (rule state) or query
-`kafka_consumergroup_group_max_lag` / `kafka_consumergroup_group_lag_seconds`
-directly.
+A bare-bones single-replica `prometheus` `Deployment` originally scraped
+both of these and evaluated one alert rule with nowhere to route it -
+**replaced by kube-prometheus-stack in #55** (see "Centralized monitoring
+and alerting" below), which is where Prometheus/Grafana/Alertmanager now
+live in this chart.
 
 Three things worth knowing, found by actually deploying this to a live
 cluster rather than just rendering the chart:
@@ -345,18 +339,98 @@ cluster rather than just rendering the chart:
   leftover socket before failing, so this failure mode is easy to miss from
   `kubectl get pods` alone. Check `kubectl logs` for "guardian failed,
   shutting down system" if lag metrics ever go missing.
-- **`prometheus`'s Deployment uses `strategy: Recreate`, not the default
-  `RollingUpdate`.** With a single replica backed by a `ReadWriteOnce` PVC,
-  `RollingUpdate` starts the new pod before killing the old one; on
-  minikube's storage class both pods were able to mount the volume at once,
-  and the new one crash-looped on Prometheus's own TSDB lock file
-  ("resource temporarily unavailable") still held by the pod being replaced.
-- **Both `prometheus.yaml` and `kafka-lag-exporter.yaml` set a
-  `checksum/config` pod annotation** hashing the values that feed their
-  ConfigMaps. Without it, `helm upgrade` updates the ConfigMap in place but
-  neither Kubernetes nor Prometheus restarts/reloads on that alone, so a
-  running pod keeps serving its old config indefinitely after an upgrade
-  that only touched `prometheus.yml`/`kafka-lag-alerts.yml`.
+- **`kafka-lag-exporter.yaml` sets a `checksum/config` pod annotation**
+  hashing the values that feed its ConfigMap. Without it, `helm upgrade`
+  updates the ConfigMap in place but nothing restarts the pod on that alone,
+  so a running pod keeps serving its old config indefinitely after an
+  upgrade that only touched `application.conf`.
+
+## Centralized monitoring and alerting (#55)
+
+`prometheus.yaml`'s hand-rolled, single-replica Prometheus (#44) scraped a
+couple of targets and evaluated one alert rule with no Alertmanager to route
+it anywhere. This issue replaces it with `kube-prometheus-stack` (Prometheus
+Operator + Prometheus + Grafana + Alertmanager + kube-state-metrics +
+node-exporter), added as this chart's first-ever Helm dependency (see
+`Chart.yaml`). Custom scrape targets and alert rules are now expressed as
+`ServiceMonitor`/`PrometheusRule` CRDs (`monitoring-servicemonitors.yaml`,
+`monitoring-rules.yaml`) instead of hand-editing a `prometheus.yml`
+ConfigMap - the Operator picks them up automatically, which is the standard
+way any future service in this repo would opt into scraping.
+
+What's scraped:
+
+- `order-service`/`order-service-vt` and `inventory-service` via their
+  existing `/actuator/prometheus` endpoints (unchanged from #44), now
+  through a `ServiceMonitor` with `basicAuth` pointed at the `api-credentials`
+  Secret instead of a mounted `password_file`.
+- `kafka-lag-exporter` (#44, consumer-group lag - unchanged).
+- `mongodb-exporter` (new) - one `percona/mongodb_exporter` instance
+  covering the whole `rs0` replica set (connects via all three per-pod DNS
+  names + `replicaSet=rs0`, so it doesn't need to run once per Mongo pod),
+  authenticating as a new least-privilege `reactive-systems-monitor` Mongo
+  user (`clusterMonitor` role only - see `mongo-secret.yaml`/`mongodb.yaml`'s
+  `mongo-init` sidecar).
+- `kafka-exporter` (new) - `danielqsj/kafka-exporter` talking the Kafka wire
+  protocol directly against the existing `PLAINTEXT` listener, for
+  broker-level metrics (under-replicated partitions, broker up/down) that
+  `kafka-lag-exporter` doesn't cover.
+
+Alert rules (`monitoring-rules.yaml`), covering the failure modes named in
+this issue:
+
+- `KafkaConsumerGroupLagHigh` - migrated unchanged from #44's retired
+  `prometheus.yaml`.
+- `MongoReplicaSetNoPrimary` - fires when no `rs0` member reports itself as
+  `PRIMARY`, the exact `InvalidReplicaSetConfig`-style failure mode this
+  issue calls out.
+- `KafkaBrokerUnderReplicated` - fires on any sustained under-replicated
+  partition.
+- Pod restart loops need no custom rule - kube-prometheus-stack's bundled
+  `defaultRules` already ships `KubePodCrashLooping`.
+
+No Slack/PagerDuty/email credential exists anywhere in this repo, so
+Alertmanager is deployed with a `null` default receiver: firing alerts are
+visible in its own UI/API but not pushed anywhere until a real receiver is
+configured (`kube-prometheus-stack.alertmanager.config` in `values.yaml`).
+
+Reach the UIs with:
+
+```bash
+kubectl port-forward -n reactive-systems svc/reactive-systems-kube-prom-prometheus 9090:9090
+kubectl port-forward -n reactive-systems svc/reactive-systems-kube-prom-alertmanager 9093:9093
+kubectl port-forward -n reactive-systems svc/reactive-systems-grafana 3000:80
+```
+
+Grafana's admin password (generated once per release, persisted across
+`helm upgrade` the same way as every other credential in this chart - see
+`grafana-admin-secret.yaml`):
+
+```bash
+kubectl get secret grafana-admin -n reactive-systems -o jsonpath='{.data.admin-password}' | base64 -d
+```
+
+A single "reactive-systems overview" dashboard (`grafana-dashboards.yaml`,
+auto-loaded via Grafana's ConfigMap sidecar) covers order-pipeline request
+rate/latency, consumer lag, and Mongo replica-set state - infra-level
+visibility (cluster/pod/node) comes from kube-prometheus-stack's own bundled
+dashboards instead of duplicating that here.
+
+> ⚠️ **`serviceMonitorSelectorNilUsesHelmValues`/`podMonitorSelectorNilUsesHelmValues`/`ruleSelectorNilUsesHelmValues`
+> must all be `false`** (see `values.yaml`). By default the Operator only
+> watches `ServiceMonitor`/`PodMonitor`/`PrometheusRule` objects carrying a
+> `release: <kube-prometheus-stack's own release name>` label - the ones in
+> this chart's own templates don't carry it. Without these three overrides,
+> every custom ServiceMonitor/PrometheusRule above is silently ignored:
+> nothing errors, the targets/alerts just never show up.
+
+- **`mongodb_mongod_replset_member_state`/`kafka_topic_partition_under_replicated_partition`
+  are the exact metric names as of `percona/mongodb_exporter:0.44` and
+  `danielqsj/kafka-exporter:v1.7.0`** - both exporters have changed label
+  /metric names across versions before. Confirm against the live
+  `/metrics` output (`kubectl port-forward` to the exporter's own Service
+  port, then `curl`) after any image bump, the same "don't trust an
+  unverified metric name" discipline as everywhere else in this file.
 
 ## Distributed tracing across the Kafka saga (#46)
 

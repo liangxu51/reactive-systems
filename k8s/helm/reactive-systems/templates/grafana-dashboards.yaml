@@ -1,0 +1,80 @@
+# Auto-loaded by kube-prometheus-stack's Grafana sidecar (#55, sidecar.
+# dashboards.enabled in values.yaml watches for this label). One overview
+# dashboard rather than several - kube-prometheus-stack's own bundled
+# dashboards already cover generic cluster/pod/node visibility, so this one
+# stays scoped to this app's own signals. Log panels (Loki) get added here
+# by #54 rather than in a second dashboard, since both share this one
+# Grafana.
+{{- if index .Values "kube-prometheus-stack" "enabled" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: reactive-systems-dashboard
+  labels:
+    grafana_dashboard: "1"
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+data:
+  reactive-systems-overview.json: |
+    {
+      "title": "reactive-systems overview",
+      "uid": "reactive-systems-overview",
+      "editable": true,
+      "timezone": "browser",
+      "time": { "from": "now-1h", "to": "now" },
+      "schemaVersion": 39,
+      "panels": [
+        {
+          "id": 1,
+          "title": "Order pipeline request rate",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "datasource": null,
+          "targets": [
+            {
+              "expr": "sum(rate(http_server_requests_seconds_count{job=~\"order-service|inventory-service\"}[5m])) by (job, uri, status)",
+              "legendFormat": "{{`{{job}}`}} {{`{{uri}}`}} {{`{{status}}`}}"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "title": "Order pipeline p99 latency",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "datasource": null,
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{job=~\"order-service|inventory-service\"}[5m])) by (le, job, uri))",
+              "legendFormat": "{{`{{job}}`}} {{`{{uri}}`}}"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "title": "Kafka consumer group lag",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "datasource": null,
+          "targets": [
+            {
+              "expr": "kafka_consumergroup_group_max_lag{cluster_name=\"reactive-systems\"}",
+              "legendFormat": "{{`{{group}}`}}"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "MongoDB replica set member state",
+          "type": "state-timeline",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "datasource": null,
+          "targets": [
+            {
+              "expr": "mongodb_mongod_replset_member_state",
+              "legendFormat": "{{`{{state}}`}}"
+            }
+          ]
+        }
+      ]
+    }
+{{- end }}

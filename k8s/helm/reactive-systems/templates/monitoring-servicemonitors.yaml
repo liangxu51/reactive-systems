@@ -1,0 +1,106 @@
+# Custom scrape targets for kube-prometheus-stack's Prometheus Operator
+# (#55). Requires kube-prometheus-stack.prometheus.prometheusSpec's three
+# *SelectorNilUsesHelmValues overrides in values.yaml - without them the
+# Operator ignores every ServiceMonitor below (see that comment for why).
+{{- if index .Values "kube-prometheus-stack" "enabled" }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: order-service
+  labels:
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      monitoring: order-service
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: http
+      path: /actuator/prometheus
+      interval: 30s
+      basicAuth:
+        username:
+          name: api-credentials
+          key: username
+        password:
+          name: api-credentials
+          key: password
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: inventory-service
+  labels:
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: inventory-service
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: http
+      path: /actuator/prometheus
+      interval: 30s
+      basicAuth:
+        username:
+          name: api-credentials
+          key: username
+        password:
+          name: api-credentials
+          key: password
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kafka-lag-exporter
+  labels:
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: kafka-lag-exporter
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: mongodb-exporter
+  labels:
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: mongodb-exporter
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kafka-exporter
+  labels:
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: kafka-exporter
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: metrics
+      interval: 30s
+{{- end }}
