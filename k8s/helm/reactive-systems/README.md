@@ -530,7 +530,7 @@ automatic source, so each service's `OrderConsumer.consume()` (and, for
 `order-service`, the point in `OrderService.createOrder()` where a new
 order's ID first becomes known) sets it explicitly via
 `MDC.putCloseable("orderId", ...)`. The result: `kubectl logs | grep
-<order-id>` (or a real log aggregator's field filter, once #54 wires one up)
+<order-id>` (or Loki's field filter, see "Centralized logging" below)
 returns every line touching that order, from every service, without
 correlating by eyeballing free-text order IDs across three separate log
 streams.
@@ -553,6 +553,70 @@ synchronous one - took another live-deployment-only bug:
   `MDC.putCloseable("orderId", ...)` again inside every single callback that
   logs, using the order ID captured in the enclosing closure rather than
   relying on it being inherited from anywhere.
+
+## Centralized logging (#54)
+
+Before this, logs only existed as ephemeral container stdout, one pod at a
+time via `kubectl logs` - no aggregation, retention, or full-text search
+across the fleet. This issue adds `loki-stack` (single-binary Loki + a
+Promtail `DaemonSet`) as this chart's second Helm dependency (see
+`Chart.yaml`), tailing every pod's stdout cluster-wide by default.
+
+Loki was picked over an ELK/EFK stack for two reasons specific to this
+repo: logs are already flat ECS JSON (#47), so Promtail needs only a
+trivial `json` pipeline stage - no grok/regex parsing, the kind of thing
+Elasticsearch's ingest-pipeline machinery would otherwise be solving for a
+problem that doesn't exist here - and #55 already brought in Grafana as
+this chart's one dashboard UI, so Loki plugs into it as a second
+datasource rather than standing up a whole separate Kibana.
+
+Promtail's pipeline stage (`values.yaml`'s `loki-stack.promtail.config.
+snippets.pipelineStages`) parses each JSON log line and promotes `service`
+(from `service.name`) and `level` (from `log.level`) to Loki labels, so
+they're filterable without a full-text scan; `traceId`, `spanId`, and
+`orderId` stay as parsed fields (see the ECS log shape in "Structured,
+correlated logging" above), queryable via LogQL's `| json` pipe. Loki
+retains logs for 7 days (`table_manager.retention_period`), matching the
+`mongodb.backup.retentionDays` precedent elsewhere in this chart rather
+than picking an arbitrary new number.
+
+Loki **self-registers** as a datasource on the one Grafana from #55: the
+`loki-stack` subchart creates a ConfigMap labeled `grafana_datasource: "1"`
+(`grafana.sidecar.datasources.enabled`, on by default in that subchart),
+which kube-prometheus-stack's Grafana sidecar auto-discovers the same way
+it auto-discovers `ServiceMonitor`/`PrometheusRule` objects for scraping
+and alerting - no manually-configured datasource needed, and a
+manually-added one would just create a duplicate (confirmed via `helm
+template` while building this). `loki-stack.grafana.enabled` stays `false`
+so loki-stack's own bundled Grafana never gets installed alongside it.
+
+Reach Loki directly (mostly for debugging the pipeline itself - normal use
+is through Grafana's Explore view once port-forwarded per #55 above):
+
+```bash
+kubectl port-forward -n reactive-systems svc/reactive-systems-loki 3100:3100
+```
+
+Example LogQL query for one order's full cross-service trail, replacing the
+`kubectl logs | grep <order-id>` from #47 above:
+
+```logql
+{service=~"order-service|inventory-service|shipping-service"} | json | orderId="<order-id>"
+```
+
+The same two-Grafana-sidecars mechanism this section relies on is worth
+calling out explicitly: **this only works because kube-prometheus-stack's
+Grafana ships `sidecar.datasources.enabled: true` by default.** If that's
+ever turned off, Loki's ConfigMap keeps rendering but silently stops being
+picked up - same "no error anywhere" failure shape as the
+`serviceMonitorSelectorNilUsesHelmValues` gotcha in #55 above.
+
+> ⚠️ **`loki-stack` is deprecated upstream** (Grafana Labs points new
+> deployments at the standalone `loki` chart's single-binary mode plus a
+> separate `promtail`/`grafana-agent` chart instead). Still functional and
+> the simplest fit for this chart's local-minikube scope as of this issue,
+> but a future dependency bump may need to migrate off it rather than just
+> bumping the version pin.
 
 ## Fixed: shipping-service Order.shippingDate bug
 

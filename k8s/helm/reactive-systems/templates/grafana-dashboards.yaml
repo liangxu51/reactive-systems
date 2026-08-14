@@ -2,9 +2,9 @@
 # dashboards.enabled in values.yaml watches for this label). One overview
 # dashboard rather than several - kube-prometheus-stack's own bundled
 # dashboards already cover generic cluster/pod/node visibility, so this one
-# stays scoped to this app's own signals. Log panels (Loki) get added here
-# by #54 rather than in a second dashboard, since both share this one
-# Grafana.
+# stays scoped to this app's own signals. Log panels (#54, Loki) are folded
+# into this same dashboard rather than a second one, since both metrics and
+# logs share this one Grafana.
 {{- if index .Values "kube-prometheus-stack" "enabled" }}
 apiVersion: v1
 kind: ConfigMap
@@ -72,6 +72,30 @@ data:
             {
               "expr": "mongodb_mongod_replset_member_state",
               "legendFormat": "{{`{{state}}`}}"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "title": "Log volume by service (#54)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+          "datasource": { "type": "loki", "uid": null },
+          "targets": [
+            {
+              "expr": "sum by (service) (count_over_time({service=~\".+\"}[1m]))"
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "title": "ERROR log rate by service (#54)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+          "datasource": { "type": "loki", "uid": null },
+          "targets": [
+            {
+              "expr": "sum by (service) (rate({service=~\".+\", level=\"ERROR\"}[5m]))"
             }
           ]
         }

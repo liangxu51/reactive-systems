@@ -15,3 +15,12 @@ dependencies:
     version: "~66.x"
     repository: https://prometheus-community.github.io/helm-charts
     condition: kube-prometheus-stack.enabled
+  # Centralized logging (#54) - single-binary Loki + a Promtail DaemonSet,
+  # appropriate for this chart's local-minikube scope (no need for Loki's
+  # distributed/microservices mode here). Logs are already flat ECS JSON
+  # (#47), so Promtail needs only a trivial `json` pipeline stage, no
+  # grok/regex parsing - see values.yaml's loki-stack block.
+  - name: loki-stack
+    version: "~2.10.x"
+    repository: https://grafana.github.io/helm-charts
+    condition: loki-stack.enabled
