@@ -172,11 +172,24 @@ jobs:
       # the deploy gate. This is a first-install every run (fresh kind
       # cluster each time), so it proves the mechanism works, not a true
       # "revert an already-good release" scenario.
+      #
+      # mongodb.backup.enabled=false: confirmed live, kind's default
+      # local-path-provisioner StorageClass uses WaitForFirstConsumer
+      # binding mode - a PVC only binds once a pod that mounts it is
+      # actually scheduled. mongo-backup-data is mounted only by the
+      # mongo-backup CronJob's pod, which won't run until its schedule
+      # fires (daily at 02:00) - never within this job's lifetime, so the
+      # PVC sits Pending forever and `helm --wait` (which waits on every
+      # PVC in the release, not just ones with a running consumer) blocked
+      # until the 5m timeout: "resource PersistentVolumeClaim/.../
+      # mongo-backup-data not ready ... PVC is not Bound". A CI smoke test
+      # doesn't need scheduled backups running anyway.
       - name: Deploy chart
         run: |
           helm upgrade --install reactive-systems k8s/helm/reactive-systems \
             --namespace reactive-systems \
             --set imagePullSecrets[0].name=ghcr-pull \
+            --set mongodb.backup.enabled=false \
             --set orderService.image.repository="$REGISTRY/order-service" \
             --set orderService.image.tag=${{ github.sha }} \
             --set orderServiceVt.image.repository="$REGISTRY/order-service-vt" \
