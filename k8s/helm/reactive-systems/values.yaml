@@ -265,6 +265,15 @@ monitoringRules:
 loki-stack:
   enabled: true
   loki:
+    # loki-stack's own upstream default is `isDefault: true` - harmless on
+    # its own, but this Grafana (kube-prometheus-stack's, see above) already
+    # provisions its own Prometheus datasource as the default
+    # (kube-prometheus-stack.grafana.sidecar.datasources.isDefaultDatasource,
+    # also true by default). Two datasources both marked default in the same
+    # org makes Grafana refuse to start outright ("Only one datasource per
+    # organization can be marked as default") - confirmed live, Grafana
+    # CrashLoopBackOff on every boot until this was set explicitly.
+    isDefault: false
     persistence:
       enabled: true
       size: 5Gi
