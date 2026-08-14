@@ -27,14 +27,16 @@ spec:
     - name: mongodb-replica-set
       rules:
         # mongodb_exporter's replset member-state gauge - fires when no
-        # member of rs0 currently reports itself as PRIMARY (state 1),
-        # covering the InvalidReplicaSetConfig failure mode named in #55's
-        # problem statement. Metric name/label set confirmed against a live
-        # mongodb_exporter 0.44 /metrics endpoint before relying on it in a
-        # real deployment - percona/mongodb_exporter's replset collector can
-        # change label names across versions.
+        # member of rs0 currently reports itself as PRIMARY, covering the
+        # InvalidReplicaSetConfig failure mode named in #55's problem
+        # statement. Metric/label confirmed live against a real
+        # mongodb_exporter 0.44 /metrics endpoint (--collector.
+        # replicasetstatus --compatible-mode, see mongodb-exporter.yaml) -
+        # it's mongodb_members_state with a member_state="PRIMARY" label,
+        # not the mongodb_mongod_replset_member_state{state=...} name
+        # originally guessed here before deploying.
         - alert: MongoReplicaSetNoPrimary
-          expr: sum(mongodb_mongod_replset_member_state{state="PRIMARY"}) == 0
+          expr: sum(mongodb_members_state{member_state="PRIMARY"}) == 0
           for: 2m
           labels:
             severity: critical

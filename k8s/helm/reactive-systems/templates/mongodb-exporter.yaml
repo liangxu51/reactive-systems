@@ -57,6 +57,19 @@ spec:
             # Ready throughout, since Ready only reflects the TCP port
             # accepting connections, not that scraping actually works.
             - --mongodb.direct-connect=false
+            # Percona's mongodb_exporter only exposes a bare mongodb_up
+            # gauge by default - every rs.status()/serverStatus() metric
+            # (including the replica-set member state this chart's alert
+            # rule and dashboard need) requires its collector explicitly
+            # enabled. With these two flags, a live 0.44 /metrics endpoint
+            # confirmed the actual metric is mongodb_members_state, labeled
+            # member_state="PRIMARY"/"SECONDARY"/etc. - NOT the
+            # mongodb_mongod_replset_member_state name originally guessed
+            # for monitoring-rules.yaml/the Grafana dashboard (both fixed
+            # to match), matching the "don't trust an unverified metric
+            # name" note in the README.
+            - --collector.replicasetstatus
+            - --compatible-mode
           ports:
             - name: metrics
               containerPort: {{ .Values.mongodbExporter.port }}

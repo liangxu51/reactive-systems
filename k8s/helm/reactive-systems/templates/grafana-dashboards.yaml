@@ -70,8 +70,8 @@ data:
           "datasource": null,
           "targets": [
             {
-              "expr": "mongodb_mongod_replset_member_state",
-              "legendFormat": "{{`{{state}}`}}"
+              "expr": "mongodb_members_state",
+              "legendFormat": "{{`{{member_idx}}`}} ({{`{{member_state}}`}})"
             }
           ]
         }
