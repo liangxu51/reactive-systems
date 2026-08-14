@@ -618,6 +618,81 @@ picked up - same "no error anywhere" failure shape as the
 > but a future dependency bump may need to migrate off it rather than just
 > bumping the version pin.
 
+## CI/CD pipeline (#58)
+
+Before this, deploys were entirely manual: `mvn package`, `docker build`,
+`helm upgrade` run by hand from a laptop, no automated pipeline, no
+deployment audit trail, no automated rollback - exactly how every image in
+this repo has been built and every release installed so far (see "Point
+Docker at minikube and build the images" above). `.github/workflows/ci.yml`
+already ran `mvn -B test` and `npm run build` on every push/PR; this issue
+extends it with three more jobs rather than adding a separate workflow file,
+so `needs:` dependencies on the existing `java-tests`/`frontend-build` jobs
+stay simple.
+
+**`build-and-push`** (`needs: [java-tests, frontend-build]`, push to
+`master` only - never on PRs) packages the four Java services
+(`mvn -DskipTests package` - tests already ran in `java-tests`), then builds
+and pushes all five images to `ghcr.io/<this repo>/<service>`, tagged with
+the git SHA (a real unique tag per build - closes the exact gap
+`values.yaml`'s own comment flags about `imagePullPolicy: IfNotPresent`
+silently serving a stale cached image forever under a reused tag) plus a
+`:latest` tag for convenience. Each image is then scanned with Trivy,
+**report-only** (`exit-code 0`) - there's no existing lint/scan gate
+anywhere else in this repo to calibrate a hard-fail severity threshold
+against yet, and this repo's base images (`eclipse-temurin`, `nginx`)
+haven't been triaged for known CVEs.
+
+**`deploy-smoke-test`** (`needs: build-and-push`) spins up an ephemeral
+[kind](https://kind.sigs.k8s.io/) cluster inside the CI job itself and
+`helm upgrade --install`s this chart into it, pointed at the images
+`build-and-push` just pushed. This is deliberately how "deploy" is answered
+here: this chart's own `Chart.yaml` says "intended for local minikube use,"
+and there is no cloud cluster, no `KUBECONFIG` secret, and no persistent
+target environment configured anywhere in this repo - a GitHub-hosted
+runner can't reach a laptop's minikube. `--atomic --wait --timeout 5m` is
+the entire "rollback on failed health checks" mechanism, with zero custom
+scripting: `--wait` blocks on the readinessProbes every Deployment/
+StatefulSet already has, `--atomic` rolls the release back automatically if
+they don't pass in time, and a failed `helm upgrade --atomic` exits
+non-zero, failing the job - that failure *is* the deploy gate. One
+follow-up curl smoke-checks `order-service`'s `/actuator/health` through
+the cluster network, proving the deploy actually serves traffic, not just
+that a TCP probe passed on an otherwise-unresponsive socket.
+
+**`deploy-target`** (`needs: deploy-smoke-test`, gated on
+`secrets.KUBE_CONFIG` being set) does the same `helm upgrade --install
+--atomic --wait` against whatever a real `KUBECONFIG` points at, with a
+longer timeout (a real cluster's first pull of five unfamiliar images plus
+MongoDB's replica-set bootstrap both take longer than a warm kind cluster).
+**This job always skips today** - no `KUBE_CONFIG` secret exists in this
+repo, which is expected, not a bug. It exists so that wiring up a real
+target later is "add one repo secret," not "write a new job." This is also
+exactly where #59 (multi-environment Helm values, out of scope for this
+issue) would hook in: once `values-dev/staging/prod.yaml` exist, this job's
+`helm upgrade` gains a `-f k8s/helm/reactive-systems/values-<env>.yaml`
+flag, likely matrixed across multiple `KUBE_CONFIG_<ENV>` secrets.
+
+To activate real deploys, add a repo secret named `KUBE_CONFIG` containing
+a base64-encoded kubeconfig for the target cluster:
+
+```bash
+kubectl config view --raw | base64 -w0 | gh secret set KUBE_CONFIG
+```
+
+- **GHCR packages default to private.** Since `deploy-smoke-test` needs to
+  pull the images it just pushed right back down into a brand-new cluster
+  in the same run, both deploy jobs explicitly create a
+  `kubectl create secret docker-registry ghcr-pull` using the workflow's own
+  `GITHUB_TOKEN` rather than relying on a manual "make the package public"
+  step - this is also the same mechanism that makes a real external cluster
+  (`deploy-target`) work without any different setup.
+- **This proves the mechanism, not a true "revert an already-good release"
+  rollback.** `deploy-smoke-test` runs against a fresh kind cluster every
+  time, so every deploy there is a first install - `--atomic` genuinely
+  reverts on a failed *upgrade* of an already-Ready release, but that
+  specific scenario isn't exercised by this pipeline yet.
+
 ## Fixed: shipping-service Order.shippingDate bug
 
 Previously, once an order reached `PREPARE_SHIPPING`, `shipping-service`

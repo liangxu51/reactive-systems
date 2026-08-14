@@ -15,6 +15,7 @@ spec:
       labels:
         app: frontend
     spec:
+      {{- include "reactive-systems.imagePullSecrets" . | nindent 6 }}
       volumes:
         - name: nginx-conf
           configMap:

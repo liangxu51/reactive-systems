@@ -17,6 +17,12 @@
 # for an ad hoc build without bumping the chart version.
 imagePullPolicy: IfNotPresent
 
+# Pull credentials for a real registry (#58) - empty by default, matching
+# the local-minikube flow above where images never need one. CI's
+# ephemeral-cluster smoke test and a real deploy-target cluster set this via
+# --set imagePullSecrets[0].name=ghcr-pull (see .github/workflows/ci.yml).
+imagePullSecrets: []
+
 mongodb:
   image: mongo:4.4
   # Matches the hostname baked into application-docker.properties.

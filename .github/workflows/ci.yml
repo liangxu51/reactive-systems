@@ -1,10 +1,13 @@
-name: CI
+name: CI/CD
 
 on:
   push:
     branches: [master]
   pull_request:
     branches: [master]
+
+env:
+  REGISTRY: ghcr.io/${{ github.repository }}
 
 jobs:
   java-tests:
@@ -44,3 +47,201 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # #58: build every service image, push to GHCR, and (report-only) scan
+  # each for known CVEs. Never runs on PRs - only a merge to master gets an
+  # image, and the workflow's automatic GITHUB_TOKEN only carries
+  # packages: write on push events for this repo anyway.
+  build-and-push:
+    name: Build and push images
+    needs: [java-tests, frontend-build]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      # Tests already ran in java-tests above - this just produces the
+      # target/*.jar each Dockerfile expects to COPY (none of the four
+      # Java services' Dockerfiles build from source, see Dockerfile).
+      - name: Package Java services
+        run: mvn -B -DskipTests package
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # A unique tag per build (the git SHA) closes the exact gap
+      # values.yaml's own comment flags: with imagePullPolicy: IfNotPresent,
+      # reusing one tag across builds would leave a node silently serving a
+      # stale cached image forever. :latest is pushed alongside purely for
+      # human convenience (`docker pull .../order-service:latest`); nothing
+      # in this pipeline or the Helm chart deploys by that tag.
+      - name: Build and push service images
+        run: |
+          set -euo pipefail
+          for svc in order-service order-service-vt inventory-service shipping-service frontend; do
+            docker build -t "$REGISTRY/$svc:${{ github.sha }}" -t "$REGISTRY/$svc:latest" "$svc"
+            docker push "$REGISTRY/$svc:${{ github.sha }}"
+            docker push "$REGISTRY/$svc:latest"
+          done
+
+      # Report-only: exit-code 0 on every scan. No lint/scan gate exists
+      # anywhere else in this repo yet to calibrate a hard-fail severity
+      # threshold against, and the base images here (eclipse-temurin,
+      # nginx) haven't been triaged for known CVEs - failing the pipeline
+      # on day one against untriaged findings would just break it outright.
+      - name: Scan images with Trivy (report-only)
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          for svc in order-service order-service-vt inventory-service shipping-service frontend; do
+            docker run --rm \
+              -v /var/run/docker.sock:/var/run/docker.sock \
+              aquasec/trivy:latest image \
+              --exit-code 0 --format table \
+              "$REGISTRY/$svc:${{ github.sha }}"
+          done
+
+  # #58: prove the Helm chart actually installs cleanly and reaches Ready
+  # against a real (if ephemeral) cluster this job creates for itself.
+  # There is no cloud cluster, no KUBECONFIG secret, and no persistent
+  # target environment configured anywhere in this repo (the chart's own
+  # Chart.yaml says "intended for local minikube use") - a GitHub-hosted
+  # runner can't reach a laptop's minikube, so this is what "CI proves the
+  # deploy works" honestly means today. See deploy-target below for
+  # deploying to a real cluster once one exists.
+  deploy-smoke-test:
+    name: Deploy smoke test (kind)
+    needs: build-and-push
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: reactive-systems-ci
+
+      - name: Create image pull secret
+        run: |
+          kubectl create namespace reactive-systems
+          kubectl create secret docker-registry ghcr-pull \
+            --namespace reactive-systems \
+            --docker-server=ghcr.io \
+            --docker-username=${{ github.actor }} \
+            --docker-password=${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build chart dependencies
+        run: helm dependency build k8s/helm/reactive-systems
+
+      # --atomic --wait --timeout is the whole "rollback on failed health
+      # checks" mechanism the issue asks for, with zero custom scripting:
+      # --wait blocks on the readinessProbes every Deployment/StatefulSet
+      # already has, and --atomic rolls the release back automatically if
+      # that doesn't happen inside the timeout. A failed `helm upgrade
+      # --atomic` exits non-zero, which fails this job - that failure IS
+      # the deploy gate. This is a first-install every run (fresh kind
+      # cluster each time), so it proves the mechanism works, not a true
+      # "revert an already-good release" scenario.
+      - name: Deploy chart
+        run: |
+          helm upgrade --install reactive-systems k8s/helm/reactive-systems \
+            --namespace reactive-systems \
+            --set imagePullSecrets[0].name=ghcr-pull \
+            --set orderService.image.repository="$REGISTRY/order-service" \
+            --set orderService.image.tag=${{ github.sha }} \
+            --set orderServiceVt.image.repository="$REGISTRY/order-service-vt" \
+            --set orderServiceVt.image.tag=${{ github.sha }} \
+            --set inventoryService.image.repository="$REGISTRY/inventory-service" \
+            --set inventoryService.image.tag=${{ github.sha }} \
+            --set shippingService.image.repository="$REGISTRY/shipping-service" \
+            --set shippingService.image.tag=${{ github.sha }} \
+            --set frontend.image.repository="$REGISTRY/frontend" \
+            --set frontend.image.tag=${{ github.sha }} \
+            --atomic --wait --timeout 5m
+
+      # Beyond "pods reported Ready" - proves order-service is actually
+      # serving through the cluster network, not just that its TCP
+      # readiness probe passed on a socket nothing is really answering on.
+      - name: Smoke check order-service health
+        run: |
+          API_USERNAME=$(kubectl get secret api-credentials -n reactive-systems -o jsonpath='{.data.username}' | base64 -d)
+          API_PASSWORD=$(kubectl get secret api-credentials -n reactive-systems -o jsonpath='{.data.password}' | base64 -d)
+          kubectl run smoke-curl --rm -i --restart=Never --namespace reactive-systems \
+            --image=curlimages/curl:8.10.1 -- \
+            curl -sf -u "$API_USERNAME:$API_PASSWORD" http://order-service:8080/actuator/health
+
+  # #58: deploy to a real target cluster, once one exists. Deliberately a
+  # single-target placeholder - #59 (multi-environment Helm values, out of
+  # scope for this issue) is what would later turn this into a matrix over
+  # multiple KUBE_CONFIG_<ENV> secrets and -f values-<env>.yaml files.
+  # KUBE_CONFIG is not set in this repo today, so this job always skips -
+  # that's expected, not a bug: wiring up a real target later is "add one
+  # repo secret," not "write a new job."
+  deploy-target:
+    name: Deploy to real target cluster
+    needs: deploy-smoke-test
+    if: ${{ github.event_name == 'push' && secrets.KUBE_CONFIG != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > ~/.kube/config
+
+      - name: Create image pull secret
+        run: |
+          kubectl create namespace reactive-systems --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret docker-registry ghcr-pull \
+            --namespace reactive-systems \
+            --docker-server=ghcr.io \
+            --docker-username=${{ github.actor }} \
+            --docker-password=${{ secrets.GITHUB_TOKEN }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Build chart dependencies
+        run: helm dependency build k8s/helm/reactive-systems
+
+      # Longer timeout than the kind smoke test - a real cluster's first
+      # pull of five previously-unfamiliar images plus MongoDB's
+      # replica-set bootstrap (see mongodb.yaml) both take longer than a
+      # warm kind cluster with everything already cached from the smoke
+      # test run moments earlier.
+      - name: Deploy chart
+        run: |
+          helm upgrade --install reactive-systems k8s/helm/reactive-systems \
+            --namespace reactive-systems --create-namespace \
+            --set imagePullSecrets[0].name=ghcr-pull \
+            --set orderService.image.repository="$REGISTRY/order-service" \
+            --set orderService.image.tag=${{ github.sha }} \
+            --set orderServiceVt.image.repository="$REGISTRY/order-service-vt" \
+            --set orderServiceVt.image.tag=${{ github.sha }} \
+            --set inventoryService.image.repository="$REGISTRY/inventory-service" \
+            --set inventoryService.image.tag=${{ github.sha }} \
+            --set shippingService.image.repository="$REGISTRY/shipping-service" \
+            --set shippingService.image.tag=${{ github.sha }} \
+            --set frontend.image.repository="$REGISTRY/frontend" \
+            --set frontend.image.tag=${{ github.sha }} \
+            --atomic --wait --timeout 10m
