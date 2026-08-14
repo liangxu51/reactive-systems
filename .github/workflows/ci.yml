@@ -134,6 +134,18 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@v4
 
+      # `helm dependency build` needs these registered locally even though
+      # Chart.yaml already carries each dependency's repository URL -
+      # confirmed live: the first real run of this job failed with "no
+      # repository definition for ... Please add the missing repos via
+      # 'helm repo add'" on a stock GitHub-hosted runner, which (unlike a
+      # dev machine that's already run this once) has no repos configured.
+      - name: Add Helm chart repos
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add grafana https://grafana.github.io/helm-charts
+          helm repo update
+
       - name: Create kind cluster
         uses: helm/kind-action@v1
         with:
@@ -228,6 +240,18 @@ jobs:
 
       - name: Set up Helm
         uses: azure/setup-helm@v4
+
+      # `helm dependency build` needs these registered locally even though
+      # Chart.yaml already carries each dependency's repository URL -
+      # confirmed live: the first real run of this job failed with "no
+      # repository definition for ... Please add the missing repos via
+      # 'helm repo add'" on a stock GitHub-hosted runner, which (unlike a
+      # dev machine that's already run this once) has no repos configured.
+      - name: Add Helm chart repos
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add grafana https://grafana.github.io/helm-charts
+          helm repo update
 
       - name: Configure kubeconfig
         run: |
