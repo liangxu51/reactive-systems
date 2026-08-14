@@ -132,6 +132,43 @@ kafka:
   # without producers failing outright.
   minInsyncReplicas: 2
 
+# Resource requests/limits for the app services (#57 prerequisite) - none of
+# these Dockerfiles set -Xmx, so the JVM's default heap sizing (25% of
+# whatever memory limit it can see) changes with these limits, not just the
+# request. Values below are set generously above `kubectl top`'s observed
+# idle working set (order-service/inventory-service ~640Mi, shipping-service
+# ~316Mi) specifically to avoid shrinking the JVM's effective heap ceiling
+# below what it already had - not a real load-tested SLA figure, same
+# "starting point, tune under real traffic" caveat as
+# prometheus.lagAlertThreshold elsewhere in this file.
+appResources:
+  jvm:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  # shipping-service has no HTTP server and lighter observed usage than the
+  # other two JVM services, but still pays the same base JVM overhead
+  # (metaspace, thread stacks, JIT code cache) - not shrunk all the way down.
+  jvmLight:
+    requests:
+      cpu: 100m
+      memory: 384Mi
+    limits:
+      cpu: 500m
+      memory: 768Mi
+  # nginx, not a JVM - observed idle usage is ~5Mi/1m, headroom here is
+  # cheap since the whole image is tiny.
+  nginx:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
 orderService:
   enabled: true
   image:

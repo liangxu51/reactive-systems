@@ -26,6 +26,8 @@ spec:
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           ports:
             - containerPort: {{ .Values.frontend.containerPort }}
+          resources:
+            {{- toYaml .Values.appResources.nginx | nindent 12 }}
           volumeMounts:
             - name: nginx-conf
               mountPath: /etc/nginx/nginx.conf

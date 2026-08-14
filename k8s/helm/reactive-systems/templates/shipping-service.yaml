@@ -35,3 +35,5 @@ spec:
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           env:
             {{- include "reactive-systems.mongoUriEnv" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.appResources.jvmLight | nindent 12 }}

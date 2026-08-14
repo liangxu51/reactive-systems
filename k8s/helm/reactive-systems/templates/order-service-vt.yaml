@@ -44,6 +44,8 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.orderServiceVt.containerPort }}
+          resources:
+            {{- toYaml .Values.appResources.jvm | nindent 12 }}
           readinessProbe:
             tcpSocket:
               port: {{ .Values.orderServiceVt.containerPort }}
