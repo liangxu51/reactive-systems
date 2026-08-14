@@ -308,6 +308,19 @@ monitoringRules:
 loki-stack:
   enabled: true
   loki:
+    # Pinned up from the loki subchart's own default (2.6.1, from July
+    # 2022) to match loki-stack's own declared appVersion. Confirmed live:
+    # Grafana's Explore view auto-fires a "logs volume" supporting query
+    # alongside every log query, using a `| drop __error__` pipeline stage
+    # (added in Loki 2.8) - against 2.6.1 this failed every single time
+    # with "parse error ... syntax error: unexpected IDENTIFIER", masking
+    # the real query's own (successful) results behind a 400 error banner
+    # in the UI. 2.9.3 still uses the same boltdb-shipper/table_manager
+    # config schema as below - not jumping to Loki 3.x, which moved to a
+    # different TSDB-based config format that would need the config block
+    # rewritten too.
+    image:
+      tag: 2.9.3
     persistence:
       enabled: true
       size: 5Gi
