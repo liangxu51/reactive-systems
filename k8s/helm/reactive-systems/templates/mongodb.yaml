@@ -136,6 +136,13 @@ spec:
                 secretKeyRef:
                   name: mongo-credentials
                   key: backup-password
+            - name: MONITOR_USERNAME
+              value: {{ .Values.mongodb.auth.monitorUsername | quote }}
+            - name: MONITOR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mongo-credentials
+                  key: monitor-password
           command:
             - sh
             - -c
@@ -268,6 +275,22 @@ spec:
                   print('backup user created');
                 } catch (e) {
                   print('backup user bootstrap skipped (already provisioned): ' + e);
+                }
+              "
+
+              # Built-in 'clusterMonitor' role (not readWrite/root) - exactly
+              # what mongodb_exporter needs to read rs.status()/serverStatus()
+              # (#55, see templates/mongodb-exporter.yaml) and nothing more.
+              mongo --host localhost -u "$ROOT_USERNAME" -p "$ROOT_PASSWORD" --authenticationDatabase admin --eval "
+                try {
+                  db.getSiblingDB('admin').createUser({
+                    user: '$MONITOR_USERNAME',
+                    pwd: '$MONITOR_PASSWORD',
+                    roles: [{role: 'clusterMonitor', db: 'admin'}]
+                  });
+                  print('monitor user created');
+                } catch (e) {
+                  print('monitor user bootstrap skipped (already provisioned): ' + e);
                 }
               "
 

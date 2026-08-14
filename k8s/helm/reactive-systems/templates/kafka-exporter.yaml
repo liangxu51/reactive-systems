@@ -1,0 +1,63 @@
+# Kafka broker-level visibility (#55) - see values.yaml's kafkaExporter
+# comment. Talks the Kafka wire protocol directly against the existing
+# PLAINTEXT listener (kafka.yaml), so unlike a JMX-based exporter this
+# needs zero changes to the kafka-broker StatefulSet.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-exporter
+  labels:
+    app: kafka-exporter
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka-exporter
+  template:
+    metadata:
+      labels:
+        app: kafka-exporter
+    spec:
+      initContainers:
+        - name: wait-for-kafka
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z {{ .Values.kafka.serviceName }} {{ .Values.kafka.port }}; do
+                echo waiting for kafka-broker; sleep 2;
+              done
+      containers:
+        - name: kafka-exporter
+          image: "{{ .Values.kafkaExporter.image }}"
+          args:
+            - --kafka.server={{ .Values.kafka.serviceName }}:{{ .Values.kafka.port }}
+            - --web.listen-address=:{{ .Values.kafkaExporter.port }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.kafkaExporter.port }}
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.kafkaExporter.port }}
+            initialDelaySeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.kafkaExporter.port }}
+            initialDelaySeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-exporter
+  labels:
+    app: kafka-exporter
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: kafka-exporter
+  ports:
+    - name: metrics
+      port: {{ .Values.kafkaExporter.port }}
+      targetPort: {{ .Values.kafkaExporter.port }}

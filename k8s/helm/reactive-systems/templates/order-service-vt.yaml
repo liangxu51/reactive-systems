@@ -8,6 +8,10 @@ metadata:
   name: order-service-vt
   labels:
     app: order-service-vt
+    # Shared with order-service.yaml's Deployment/Service - see that file's
+    # comment for why (mutually exclusive, same Service name, one
+    # ServiceMonitor covers whichever is enabled).
+    monitoring: order-service
     {{- include "reactive-systems.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.orderServiceVt.replicaCount }}
@@ -37,7 +41,8 @@ spec:
             {{- include "reactive-systems.mongoUriEnv" . | nindent 12 }}
             {{- include "reactive-systems.apiAuthEnv" . | nindent 12 }}
           ports:
-            - containerPort: {{ .Values.orderServiceVt.containerPort }}
+            - name: http
+              containerPort: {{ .Values.orderServiceVt.containerPort }}
           readinessProbe:
             tcpSocket:
               port: {{ .Values.orderServiceVt.containerPort }}
@@ -56,11 +61,13 @@ metadata:
   name: order-service
   labels:
     app: order-service-vt
+    monitoring: order-service
     {{- include "reactive-systems.labels" . | nindent 4 }}
 spec:
   selector:
     app: order-service-vt
   ports:
-    - port: {{ .Values.orderServiceVt.servicePort }}
+    - name: http
+      port: {{ .Values.orderServiceVt.servicePort }}
       targetPort: {{ .Values.orderServiceVt.containerPort }}
 {{- end }}

@@ -50,6 +50,10 @@ mongodb:
     # Least-privilege identity for mongodump (see templates/mongo-backup.yaml)
     # - granted only the built-in 'backup' role, not readWrite/root.
     backupUsername: reactive-systems-backup
+    # Least-privilege identity for mongodb_exporter (#55, see
+    # templates/mongodb-exporter.yaml) - granted only the built-in
+    # 'clusterMonitor' role, not readWrite/root.
+    monitorUsername: reactive-systems-monitor
   # Scheduled mongodump backups (#36) - see templates/mongo-backup.yaml.
   # Lands on a local PVC, not off-cluster object storage: this chart targets
   # a single-node minikube dev cluster (see header above), so it protects
@@ -171,23 +175,82 @@ kafkaLagExporter:
   # message count - 60 * pollIntervalSeconds (30s) = 30 minutes of history.
   lookupTableSize: 60
 
-# Bare-bones single-replica Prometheus (#44) - no Alertmanager, no remote
-# storage, no HA. It scrapes kafka-lag-exporter plus each web-enabled
-# service's own /actuator/prometheus, and evaluates one alerting rule
-# (kafka-lag-alerts.yml, see prometheus.yaml) - "evaluates", not "routes":
-# with no Alertmanager configured, a firing alert is only visible on
-# Prometheus's own /alerts page, not paged anywhere. Wire up Alertmanager
-# separately (see #55) if that's needed.
-prometheus:
-  image: prom/prometheus:v2.53.0
-  port: 9090
-  scrapeIntervalSeconds: 30
-  persistence:
+# Centralized monitoring & alerting (#55) - kube-prometheus-stack subchart
+# (Prometheus Operator + Grafana + Alertmanager + kube-state-metrics +
+# node-exporter). Replaces the hand-rolled single-replica Prometheus from
+# #44 (see Chart.yaml's dependencies block) - custom scrape targets/alerts
+# below are expressed as ServiceMonitor/PrometheusRule CRDs instead of a
+# hand-edited ConfigMap (see monitoring-servicemonitors.yaml/
+# monitoring-rules.yaml), which this Operator picks up automatically.
+kube-prometheus-stack:
+  enabled: true
+  prometheus:
+    prometheusSpec:
+      # By default the Operator only watches ServiceMonitors/PodMonitors/
+      # PrometheusRules carrying a `release: <this subchart's release name>`
+      # label - our own hand-written ones (living in the parent chart, not a
+      # separately-labeled sub-release) don't carry it. Without these three
+      # overrides every custom ServiceMonitor/PrometheusRule below is
+      # silently ignored: nothing errors, the targets/alerts just never show
+      # up. Confirmed live against a real Operator deployment.
+      serviceMonitorSelectorNilUsesHelmValues: false
+      podMonitorSelectorNilUsesHelmValues: false
+      ruleSelectorNilUsesHelmValues: false
+  alertmanager:
     enabled: true
-    size: 2Gi
-  # Sustained per-partition lag (messages) before KafkaConsumerGroupLagHigh
-  # fires - picked as "clearly not normal for this demo's traffic", not
-  # derived from a real throughput SLA. Tune to your own workload.
+    # No Slack/PagerDuty/email credential exists anywhere in this repo -
+    # alerts are visible/routed in Alertmanager's own UI/API but not pushed
+    # anywhere until a real receiver is configured. Deliberately not
+    # inventing a fake webhook here.
+    config:
+      route:
+        receiver: "null"
+      receivers:
+        - name: "null"
+  grafana:
+    enabled: true
+    admin:
+      existingSecret: grafana-admin
+      userKey: admin-user
+      passwordKey: admin-password
+    persistence:
+      enabled: true
+      size: 2Gi
+    sidecar:
+      dashboards:
+        enabled: true
+    # Loki datasource added here once #54 lands (loki-stack:3100) - Loki is
+    # meant to be an additional datasource in this one Grafana, not a
+    # second UI.
+    additionalDataSources: []
+  defaultRules:
+    # Ships alerts like KubePodCrashLooping (kube-state-metrics-based) for
+    # free - covers the "pod restart loops" failure mode from the issue
+    # without any custom rule.
+    create: true
+
+# MongoDB replica-set visibility (#55) - no exporter previously existed, so
+# InvalidReplicaSetConfig/no-primary states (see #55's problem statement)
+# were only noticed when a user reported a broken page. One exporter
+# instance covers the whole 3-member rs0 replica set (queries rs.status()
+# against any reachable member), so this isn't one-per-pod.
+mongodbExporter:
+  image: percona/mongodb_exporter:0.44
+  port: 9216
+
+# Kafka broker-level visibility (#55) - kafka-lag-exporter (#44) only covers
+# consumer lag, not broker health (under-replicated partitions, broker
+# up/down). kafka_exporter talks the Kafka wire protocol directly against
+# the existing PLAINTEXT listener, so it needs zero changes to kafka.yaml's
+# StatefulSet (no JMX port/javaagent to inject).
+kafkaExporter:
+  image: danielqsj/kafka-exporter:v1.7.0
+  port: 9308
+
+# Sustained per-partition lag (messages) before KafkaConsumerGroupLagHigh
+# fires - picked as "clearly not normal for this demo's traffic", not
+# derived from a real throughput SLA. Tune to your own workload.
+monitoringRules:
   lagAlertThreshold: 500
 
 # Distributed tracing across the Kafka saga (#46) - single jaegertracing/

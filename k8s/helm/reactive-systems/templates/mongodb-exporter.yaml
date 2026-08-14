@@ -1,0 +1,98 @@
+# MongoDB replica-set visibility (#55) - see values.yaml's mongodbExporter
+# comment. One exporter instance, not one per mongo-db pod: mongodb_exporter
+# queries rs.status()/serverStatus() against a single reachable member and
+# that already reflects the state of every member in the replica set, the
+# same way `mongo --eval "rs.status()"` does from any one node.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongodb-exporter
+  labels:
+    app: mongodb-exporter
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongodb-exporter
+  template:
+    metadata:
+      labels:
+        app: mongodb-exporter
+    spec:
+      initContainers:
+        - name: wait-for-mongo
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z {{ .Values.mongodb.serviceName }} {{ .Values.mongodb.port }}; do
+                echo waiting for mongo-db; sleep 2;
+              done
+      containers:
+        - name: mongodb-exporter
+          image: "{{ .Values.mongodbExporter.image }}"
+          env:
+            - name: MONITOR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mongo-credentials
+                  key: monitor-password
+            # Lists all three per-pod DNS names (not just the Service name)
+            # so the driver can discover and connect to whichever member is
+            # currently primary - a plain mongo-db:27017 target would only
+            # ever reach one arbitrarily-chosen pod behind the headless
+            # Service's round-robin-ish DNS resolution.
+            - name: MONGODB_URI
+              value: "mongodb://{{ .Values.mongodb.auth.monitorUsername }}:$(MONITOR_PASSWORD)@{{ range $i := until (int .Values.mongodb.replicaCount) }}{{ if $i }},{{ end }}mongo-db-{{ $i }}.{{ $.Values.mongodb.serviceName }}.{{ $.Release.Namespace }}.svc.cluster.local:27017{{ end }}/?replicaSet=rs0&authSource=admin"
+          args:
+            # mongodb_exporter's --mongodb.direct-connect defaults to true,
+            # which the Go Mongo driver rejects outright when given multiple
+            # seed hosts ("a direct connection cannot be made if multiple
+            # hosts are specified") - confirmed live, the exporter never
+            # successfully connected and every replica-set/server-status
+            # metric was silently absent (only the exporter's own
+            # mongodb_up=0 gauge existed) despite the pod itself reporting
+            # Ready throughout, since Ready only reflects the TCP port
+            # accepting connections, not that scraping actually works.
+            - --mongodb.direct-connect=false
+            # Percona's mongodb_exporter only exposes a bare mongodb_up
+            # gauge by default - every rs.status()/serverStatus() metric
+            # (including the replica-set member state this chart's alert
+            # rule and dashboard need) requires its collector explicitly
+            # enabled. With these two flags, a live 0.44 /metrics endpoint
+            # confirmed the actual metric is mongodb_members_state, labeled
+            # member_state="PRIMARY"/"SECONDARY"/etc. - NOT the
+            # mongodb_mongod_replset_member_state name originally guessed
+            # for monitoring-rules.yaml/the Grafana dashboard (both fixed
+            # to match), matching the "don't trust an unverified metric
+            # name" note in the README.
+            - --collector.replicasetstatus
+            - --compatible-mode
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.mongodbExporter.port }}
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.mongodbExporter.port }}
+            initialDelaySeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.mongodbExporter.port }}
+            initialDelaySeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb-exporter
+  labels:
+    app: mongodb-exporter
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: mongodb-exporter
+  ports:
+    - name: metrics
+      port: {{ .Values.mongodbExporter.port }}
+      targetPort: {{ .Values.mongodbExporter.port }}

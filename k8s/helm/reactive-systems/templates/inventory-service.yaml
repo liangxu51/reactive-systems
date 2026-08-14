@@ -33,7 +33,8 @@ spec:
             {{- include "reactive-systems.mongoUriEnv" . | nindent 12 }}
             {{- include "reactive-systems.apiAuthEnv" . | nindent 12 }}
           ports:
-            - containerPort: {{ .Values.inventoryService.containerPort }}
+            - name: http
+              containerPort: {{ .Values.inventoryService.containerPort }}
           readinessProbe:
             tcpSocket:
               port: {{ .Values.inventoryService.containerPort }}
@@ -54,5 +55,6 @@ spec:
   selector:
     app: inventory-service
   ports:
-    - port: {{ .Values.inventoryService.servicePort }}
+    - name: http
+      port: {{ .Values.inventoryService.servicePort }}
       targetPort: {{ .Values.inventoryService.containerPort }}

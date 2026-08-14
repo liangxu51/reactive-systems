@@ -90,7 +90,8 @@ spec:
             - name: config
               mountPath: /opt/docker/conf
           ports:
-            - containerPort: {{ .Values.kafkaLagExporter.port }}
+            - name: metrics
+              containerPort: {{ .Values.kafkaLagExporter.port }}
           readinessProbe:
             tcpSocket:
               port: {{ .Values.kafkaLagExporter.port }}
@@ -111,5 +112,6 @@ spec:
   selector:
     app: kafka-lag-exporter
   ports:
-    - port: {{ .Values.kafkaLagExporter.port }}
+    - name: metrics
+      port: {{ .Values.kafkaLagExporter.port }}
       targetPort: {{ .Values.kafkaLagExporter.port }}
