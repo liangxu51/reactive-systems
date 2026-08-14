@@ -46,6 +46,17 @@ spec:
             # Service's round-robin-ish DNS resolution.
             - name: MONGODB_URI
               value: "mongodb://{{ .Values.mongodb.auth.monitorUsername }}:$(MONITOR_PASSWORD)@{{ range $i := until (int .Values.mongodb.replicaCount) }}{{ if $i }},{{ end }}mongo-db-{{ $i }}.{{ $.Values.mongodb.serviceName }}.{{ $.Release.Namespace }}.svc.cluster.local:27017{{ end }}/?replicaSet=rs0&authSource=admin"
+          args:
+            # mongodb_exporter's --mongodb.direct-connect defaults to true,
+            # which the Go Mongo driver rejects outright when given multiple
+            # seed hosts ("a direct connection cannot be made if multiple
+            # hosts are specified") - confirmed live, the exporter never
+            # successfully connected and every replica-set/server-status
+            # metric was silently absent (only the exporter's own
+            # mongodb_up=0 gauge existed) despite the pod itself reporting
+            # Ready throughout, since Ready only reflects the TCP port
+            # accepting connections, not that scraping actually works.
+            - --mongodb.direct-connect=false
           ports:
             - name: metrics
               containerPort: {{ .Values.mongodbExporter.port }}
