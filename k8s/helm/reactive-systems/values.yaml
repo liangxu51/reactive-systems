@@ -294,8 +294,21 @@ loki-stack:
         - url: http://reactive-systems-loki:3100/loki/api/v1/push
       snippets:
         pipelineStages:
-          # Container runtime log framing (default stage, kept).
-          - cri: {}
+          # Container runtime log framing - `docker`, NOT `cri`. minikube's
+          # docker driver writes container logs in Docker's own json-file
+          # format ({"log":"<line>","stream":"stdout","time":"..."}), not
+          # containerd/CRI's plaintext format (`cri: {}` expects). Confirmed
+          # live: with `cri: {}` here, every stored line stayed wrapped as
+          # {"log":"<escaped app JSON as a string>",...} - the json stage
+          # below then tried `log.level`/`service.name` against a STRING
+          # field named "log", which silently extracts nothing, so
+          # service/level never got promoted to labels despite the pipeline
+          # "working" with no errors anywhere. `docker: {}` unwraps that
+          # envelope first, extracting `.log` as the new pipeline entry
+          # (the app's actual ECS JSON line) and `stream` as a label - only
+          # then is the `json` stage below parsing what it thinks it's
+          # parsing.
+          - docker: {}
           # Logs are already flat ECS JSON (#47) - no grok/regex needed,
           # just parse the fields worth promoting to Loki labels for
           # correlation with Jaeger traces (traceId/spanId) and the order
