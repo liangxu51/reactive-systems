@@ -59,6 +59,19 @@ Chart.yaml, but missing in charts/ directory":
 helm dependency build k8s/helm/reactive-systems
 ```
 
+`kube-prometheus-stack`'s own CRDs also need installing once per cluster,
+by hand - Helm's automatic CRD-first-install only covers a chart's own
+top-level `crds/` directory, not the nested subchart these ship in (see
+the ⚠️ callout under "Centralized monitoring and alerting" below for the
+full explanation and exact commands), or `helm install`/`upgrade` fails
+with `no matches for kind "Prometheus"/... in version
+"monitoring.coreos.com/v1", ensure CRDs are installed first`:
+
+```bash
+tar xzf k8s/helm/reactive-systems/charts/kube-prometheus-stack-*.tgz -C /tmp
+kubectl apply --server-side -f /tmp/kube-prometheus-stack/charts/crds/crds/
+```
+
 Installed into its own namespace so it doesn't mix with anything else
 already running on the cluster:
 
@@ -394,6 +407,26 @@ Alertmanager is deployed with a `null` default receiver: firing alerts are
 visible in its own UI/API but not pushed anywhere until a real receiver is
 configured (`kube-prometheus-stack.alertmanager.config` in `values.yaml`).
 
+> ⚠️ **Install the CRDs manually before the first `helm install`/`upgrade`
+> that adds this dependency** - `kube-prometheus-stack` ships its CRDs
+> (`Prometheus`, `Alertmanager`, `ServiceMonitor`, `PrometheusRule`, etc.)
+> inside a *nested* subchart (`charts/kube-prometheus-stack/charts/crds/
+> crds/*.yaml`), and Helm's automatic CRD-first-install mechanism only
+> looks at a chart's own top-level `crds/` directory, not
+> subcharts-of-subcharts. Confirmed live: both a fresh `helm install` and a
+> `helm upgrade` of a pre-existing release failed outright with `no matches
+> for kind "Prometheus"/"Alertmanager"/"ServiceMonitor"/"PrometheusRule" in
+> version "monitoring.coreos.com/v1", ensure CRDs are installed first` until
+> the CRDs were applied by hand:
+> ```bash
+> helm dependency build k8s/helm/reactive-systems
+> tar xzf k8s/helm/reactive-systems/charts/kube-prometheus-stack-*.tgz -C /tmp
+> kubectl apply --server-side -f /tmp/kube-prometheus-stack/charts/crds/crds/
+> ```
+> This is a one-time step per cluster (CRDs are cluster-scoped, not
+> per-release) - subsequent `helm upgrade`s against the same cluster don't
+> need it repeated.
+
 Reach the UIs with:
 
 ```bash
@@ -431,6 +464,23 @@ dashboards instead of duplicating that here.
   `/metrics` output (`kubectl port-forward` to the exporter's own Service
   port, then `curl`) after any image bump, the same "don't trust an
   unverified metric name" discipline as everywhere else in this file.
+- **This chart's resource footprint grew substantially once
+  `kube-prometheus-stack`/`loki-stack` were added on top of the existing
+  3-broker Kafka cluster, 3-member Mongo replica set, and app services.**
+  Confirmed live on an 8-CPU minikube profile with the docker driver's
+  memory limit set to ~11.4GB: bringing everything up together (a `helm
+  upgrade` of an existing release, so every pod restarts/rolls at once
+  rather than staggering) pushed memory to ~75% of that limit and load
+  average to ~22, which was enough to destabilize `kafka-broker` StatefulSet
+  pods - one had its container sandbox killed outright ("Pod sandbox
+  changed, it will be killed and re-created"), and a second was killed by
+  its own liveness probe mid-JVM-startup before it had a chance to bind its
+  port. Both recovered cleanly on their own PVC once memory pressure eased
+  (down to ~55%) - no data loss, just a rough few minutes during the
+  transition. `minikube start --memory=16g --cpus=6` (or similar - use
+  whatever headroom your machine has) is a safer floor for this chart's
+  footprint than whatever default or pre-#55 allocation you were running
+  with.
 
 ## Distributed tracing across the Kafka saga (#46)
 
