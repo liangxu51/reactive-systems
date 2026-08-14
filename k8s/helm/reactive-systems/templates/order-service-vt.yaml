@@ -23,6 +23,7 @@ spec:
       labels:
         app: order-service-vt
     spec:
+      {{- include "reactive-systems.imagePullSecrets" . | nindent 6 }}
       initContainers:
         - name: wait-for-mongo-kafka
           image: busybox:1.36
@@ -43,6 +44,8 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.orderServiceVt.containerPort }}
+          resources:
+            {{- toYaml .Values.appResources.jvm | nindent 12 }}
           readinessProbe:
             tcpSocket:
               port: {{ .Values.orderServiceVt.containerPort }}

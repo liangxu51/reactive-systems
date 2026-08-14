@@ -15,6 +15,7 @@ spec:
       labels:
         app: frontend
     spec:
+      {{- include "reactive-systems.imagePullSecrets" . | nindent 6 }}
       volumes:
         - name: nginx-conf
           configMap:
@@ -25,6 +26,8 @@ spec:
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           ports:
             - containerPort: {{ .Values.frontend.containerPort }}
+          resources:
+            {{- toYaml .Values.appResources.nginx | nindent 12 }}
           volumeMounts:
             - name: nginx-conf
               mountPath: /etc/nginx/nginx.conf

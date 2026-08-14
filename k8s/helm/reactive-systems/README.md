@@ -580,7 +580,7 @@ automatic source, so each service's `OrderConsumer.consume()` (and, for
 `order-service`, the point in `OrderService.createOrder()` where a new
 order's ID first becomes known) sets it explicitly via
 `MDC.putCloseable("orderId", ...)`. The result: `kubectl logs | grep
-<order-id>` (or a real log aggregator's field filter, once #54 wires one up)
+<order-id>` (or Loki's field filter, see "Centralized logging" below)
 returns every line touching that order, from every service, without
 correlating by eyeballing free-text order IDs across three separate log
 streams.
@@ -603,6 +603,145 @@ synchronous one - took another live-deployment-only bug:
   `MDC.putCloseable("orderId", ...)` again inside every single callback that
   logs, using the order ID captured in the enclosing closure rather than
   relying on it being inherited from anywhere.
+
+## Centralized logging (#54)
+
+Before this, logs only existed as ephemeral container stdout, one pod at a
+time via `kubectl logs` - no aggregation, retention, or full-text search
+across the fleet. This issue adds `loki-stack` (single-binary Loki + a
+Promtail `DaemonSet`) as this chart's second Helm dependency (see
+`Chart.yaml`), tailing every pod's stdout cluster-wide by default.
+
+Loki was picked over an ELK/EFK stack for two reasons specific to this
+repo: logs are already flat ECS JSON (#47), so Promtail needs only a
+trivial `json` pipeline stage - no grok/regex parsing, the kind of thing
+Elasticsearch's ingest-pipeline machinery would otherwise be solving for a
+problem that doesn't exist here - and #55 already brought in Grafana as
+this chart's one dashboard UI, so Loki plugs into it as a second
+datasource rather than standing up a whole separate Kibana.
+
+Promtail's pipeline stage (`values.yaml`'s `loki-stack.promtail.config.
+snippets.pipelineStages`) parses each JSON log line and promotes `service`
+(from `service.name`) and `level` (from `log.level`) to Loki labels, so
+they're filterable without a full-text scan; `traceId`, `spanId`, and
+`orderId` stay as parsed fields (see the ECS log shape in "Structured,
+correlated logging" above), queryable via LogQL's `| json` pipe. Loki
+retains logs for 7 days (`table_manager.retention_period`), matching the
+`mongodb.backup.retentionDays` precedent elsewhere in this chart rather
+than picking an arbitrary new number.
+
+Loki **self-registers** as a datasource on the one Grafana from #55: the
+`loki-stack` subchart creates a ConfigMap labeled `grafana_datasource: "1"`
+(`grafana.sidecar.datasources.enabled`, on by default in that subchart),
+which kube-prometheus-stack's Grafana sidecar auto-discovers the same way
+it auto-discovers `ServiceMonitor`/`PrometheusRule` objects for scraping
+and alerting - no manually-configured datasource needed, and a
+manually-added one would just create a duplicate (confirmed via `helm
+template` while building this). `loki-stack.grafana.enabled` stays `false`
+so loki-stack's own bundled Grafana never gets installed alongside it.
+
+Reach Loki directly (mostly for debugging the pipeline itself - normal use
+is through Grafana's Explore view once port-forwarded per #55 above):
+
+```bash
+kubectl port-forward -n reactive-systems svc/reactive-systems-loki 3100:3100
+```
+
+Example LogQL query for one order's full cross-service trail, replacing the
+`kubectl logs | grep <order-id>` from #47 above:
+
+```logql
+{service=~"order-service|inventory-service|shipping-service"} | json | orderId="<order-id>"
+```
+
+The same two-Grafana-sidecars mechanism this section relies on is worth
+calling out explicitly: **this only works because kube-prometheus-stack's
+Grafana ships `sidecar.datasources.enabled: true` by default.** If that's
+ever turned off, Loki's ConfigMap keeps rendering but silently stops being
+picked up - same "no error anywhere" failure shape as the
+`serviceMonitorSelectorNilUsesHelmValues` gotcha in #55 above.
+
+> ⚠️ **`loki-stack` is deprecated upstream** (Grafana Labs points new
+> deployments at the standalone `loki` chart's single-binary mode plus a
+> separate `promtail`/`grafana-agent` chart instead). Still functional and
+> the simplest fit for this chart's local-minikube scope as of this issue,
+> but a future dependency bump may need to migrate off it rather than just
+> bumping the version pin.
+
+## CI/CD pipeline (#58)
+
+Before this, deploys were entirely manual: `mvn package`, `docker build`,
+`helm upgrade` run by hand from a laptop, no automated pipeline, no
+deployment audit trail, no automated rollback - exactly how every image in
+this repo has been built and every release installed so far (see "Point
+Docker at minikube and build the images" above). `.github/workflows/ci.yml`
+already ran `mvn -B test` and `npm run build` on every push/PR; this issue
+extends it with three more jobs rather than adding a separate workflow file,
+so `needs:` dependencies on the existing `java-tests`/`frontend-build` jobs
+stay simple.
+
+**`build-and-push`** (`needs: [java-tests, frontend-build]`, push to
+`master` only - never on PRs) packages the four Java services
+(`mvn -DskipTests package` - tests already ran in `java-tests`), then builds
+and pushes all five images to `ghcr.io/<this repo>/<service>`, tagged with
+the git SHA (a real unique tag per build - closes the exact gap
+`values.yaml`'s own comment flags about `imagePullPolicy: IfNotPresent`
+silently serving a stale cached image forever under a reused tag) plus a
+`:latest` tag for convenience. Each image is then scanned with Trivy,
+**report-only** (`exit-code 0`) - there's no existing lint/scan gate
+anywhere else in this repo to calibrate a hard-fail severity threshold
+against yet, and this repo's base images (`eclipse-temurin`, `nginx`)
+haven't been triaged for known CVEs.
+
+**`deploy-smoke-test`** (`needs: build-and-push`) spins up an ephemeral
+[kind](https://kind.sigs.k8s.io/) cluster inside the CI job itself and
+`helm upgrade --install`s this chart into it, pointed at the images
+`build-and-push` just pushed. This is deliberately how "deploy" is answered
+here: this chart's own `Chart.yaml` says "intended for local minikube use,"
+and there is no cloud cluster, no `KUBECONFIG` secret, and no persistent
+target environment configured anywhere in this repo - a GitHub-hosted
+runner can't reach a laptop's minikube. `--atomic --wait --timeout 5m` is
+the entire "rollback on failed health checks" mechanism, with zero custom
+scripting: `--wait` blocks on the readinessProbes every Deployment/
+StatefulSet already has, `--atomic` rolls the release back automatically if
+they don't pass in time, and a failed `helm upgrade --atomic` exits
+non-zero, failing the job - that failure *is* the deploy gate. One
+follow-up curl smoke-checks `order-service`'s `/actuator/health` through
+the cluster network, proving the deploy actually serves traffic, not just
+that a TCP probe passed on an otherwise-unresponsive socket.
+
+**`deploy-target`** (`needs: deploy-smoke-test`, gated on
+`secrets.KUBE_CONFIG` being set) does the same `helm upgrade --install
+--atomic --wait` against whatever a real `KUBECONFIG` points at, with a
+longer timeout (a real cluster's first pull of five unfamiliar images plus
+MongoDB's replica-set bootstrap both take longer than a warm kind cluster).
+**This job always skips today** - no `KUBE_CONFIG` secret exists in this
+repo, which is expected, not a bug. It exists so that wiring up a real
+target later is "add one repo secret," not "write a new job." This is also
+exactly where #59 (multi-environment Helm values, out of scope for this
+issue) would hook in: once `values-dev/staging/prod.yaml` exist, this job's
+`helm upgrade` gains a `-f k8s/helm/reactive-systems/values-<env>.yaml`
+flag, likely matrixed across multiple `KUBE_CONFIG_<ENV>` secrets.
+
+To activate real deploys, add a repo secret named `KUBE_CONFIG` containing
+a base64-encoded kubeconfig for the target cluster:
+
+```bash
+kubectl config view --raw | base64 -w0 | gh secret set KUBE_CONFIG
+```
+
+- **GHCR packages default to private.** Since `deploy-smoke-test` needs to
+  pull the images it just pushed right back down into a brand-new cluster
+  in the same run, both deploy jobs explicitly create a
+  `kubectl create secret docker-registry ghcr-pull` using the workflow's own
+  `GITHUB_TOKEN` rather than relying on a manual "make the package public"
+  step - this is also the same mechanism that makes a real external cluster
+  (`deploy-target`) work without any different setup.
+- **This proves the mechanism, not a true "revert an already-good release"
+  rollback.** `deploy-smoke-test` runs against a fresh kind cluster every
+  time, so every deploy there is a first install - `--atomic` genuinely
+  reverts on a failed *upgrade* of an already-Ready release, but that
+  specific scenario isn't exercised by this pipeline yet.
 
 ## Fixed: shipping-service Order.shippingDate bug
 

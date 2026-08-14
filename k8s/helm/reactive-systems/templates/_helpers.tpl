@@ -4,6 +4,21 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 
 {{/*
+imagePullSecrets for pulling app-service images from a real registry (#58)
+- empty by default (values.yaml), zero behavior change for the local-
+minikube flow where images are built straight into minikube's own Docker
+daemon and never need a pull secret. Only CI's ephemeral-cluster smoke test
+and a real deploy-target cluster set this, via
+--set imagePullSecrets[0].name=....
+*/}}
+{{- define "reactive-systems.imagePullSecrets" -}}
+{{- if .Values.imagePullSecrets -}}
+imagePullSecrets:
+  {{- toYaml .Values.imagePullSecrets | nindent 0 }}
+{{- end }}
+{{- end -}}
+
+{{/*
 Env vars for the shared app-service Mongo user (see mongodb.yaml/mongo-secret.yaml,
 issue #33). SPRING_MONGODB_URI overrides application-docker.properties'
 credential-free default via Spring's relaxed env-var binding. MONGO_APP_PASSWORD

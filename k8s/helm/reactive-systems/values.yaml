@@ -17,6 +17,12 @@
 # for an ad hoc build without bumping the chart version.
 imagePullPolicy: IfNotPresent
 
+# Pull credentials for a real registry (#58) - empty by default, matching
+# the local-minikube flow above where images never need one. CI's
+# ephemeral-cluster smoke test and a real deploy-target cluster set this via
+# --set imagePullSecrets[0].name=ghcr-pull (see .github/workflows/ci.yml).
+imagePullSecrets: []
+
 mongodb:
   image: mongo:4.4
   # Matches the hostname baked into application-docker.properties.
@@ -126,6 +132,43 @@ kafka:
   # without producers failing outright.
   minInsyncReplicas: 2
 
+# Resource requests/limits for the app services (#57 prerequisite) - none of
+# these Dockerfiles set -Xmx, so the JVM's default heap sizing (25% of
+# whatever memory limit it can see) changes with these limits, not just the
+# request. Values below are set generously above `kubectl top`'s observed
+# idle working set (order-service/inventory-service ~640Mi, shipping-service
+# ~316Mi) specifically to avoid shrinking the JVM's effective heap ceiling
+# below what it already had - not a real load-tested SLA figure, same
+# "starting point, tune under real traffic" caveat as
+# prometheus.lagAlertThreshold elsewhere in this file.
+appResources:
+  jvm:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  # shipping-service has no HTTP server and lighter observed usage than the
+  # other two JVM services, but still pays the same base JVM overhead
+  # (metaspace, thread stacks, JIT code cache) - not shrunk all the way down.
+  jvmLight:
+    requests:
+      cpu: 100m
+      memory: 384Mi
+    limits:
+      cpu: 500m
+      memory: 768Mi
+  # nginx, not a JVM - observed idle usage is ~5Mi/1m, headroom here is
+  # cheap since the whole image is tiny.
+  nginx:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
 orderService:
   enabled: true
   image:
@@ -219,10 +262,17 @@ kube-prometheus-stack:
     sidecar:
       dashboards:
         enabled: true
-    # Loki datasource added here once #54 lands (loki-stack:3100) - Loki is
-    # meant to be an additional datasource in this one Grafana, not a
-    # second UI.
-    additionalDataSources: []
+    # Loki self-registers as a datasource on THIS Grafana (#54) via a
+    # ConfigMap the loki-stack subchart creates, labeled grafana_datasource:
+    # "1" - the same sidecar.datasources mechanism used above for
+    # auto-discovering ServiceMonitors/PrometheusRules, just for
+    # datasources. No manual additionalDataSources entry needed here (and
+    # adding one would just create a duplicate "Loki" datasource alongside
+    # the auto-discovered one - confirmed via `helm template` before
+    # settling on this). loki-stack's own Grafana subchart stays disabled
+    # (see loki-stack.grafana.enabled below) so there's exactly one Grafana
+    # in this deployment, with Loki wired into it as a second datasource
+    # alongside Prometheus.
   defaultRules:
     # Ships alerts like KubePodCrashLooping (kube-state-metrics-based) for
     # free - covers the "pod restart loops" failure mode from the issue
@@ -252,6 +302,53 @@ kafkaExporter:
 # derived from a real throughput SLA. Tune to your own workload.
 monitoringRules:
   lagAlertThreshold: 500
+
+# Centralized logging (#54) - loki-stack subchart (single-binary Loki + a
+# Promtail DaemonSet). See Chart.yaml's dependencies block.
+loki-stack:
+  enabled: true
+  loki:
+    persistence:
+      enabled: true
+      size: 5Gi
+    config:
+      table_manager:
+        # 7 days, matching the mongodb.backup.retentionDays precedent above
+        # rather than picking an arbitrary new number.
+        retention_deletes_enabled: true
+        retention_period: 168h
+  promtail:
+    config:
+      # Points explicitly at the loki subchart's rendered Service name
+      # (confirmed via `helm template`, not the chart's own tpl default,
+      # which resolves to plain "{{ .Release.Name }}" - i.e. just
+      # "reactive-systems" with no "-loki" suffix - and would silently push
+      # logs nowhere reachable under this chart's release name).
+      clients:
+        - url: http://reactive-systems-loki:3100/loki/api/v1/push
+      snippets:
+        pipelineStages:
+          # Container runtime log framing (default stage, kept).
+          - cri: {}
+          # Logs are already flat ECS JSON (#47) - no grok/regex needed,
+          # just parse the fields worth promoting to Loki labels for
+          # correlation with Jaeger traces (traceId/spanId) and the order
+          # saga (orderId).
+          - json:
+              expressions:
+                level: log.level
+                service: service.name
+                traceId: traceId
+                spanId: spanId
+                orderId: orderId
+          - labels:
+              level:
+              service:
+  # loki-stack can deploy its own Grafana - explicitly disabled so there's
+  # exactly one Grafana in this deployment (kube-prometheus-stack's above),
+  # with Loki wired in as a datasource on it instead.
+  grafana:
+    enabled: false
 
 # Distributed tracing across the Kafka saga (#46) - single jaegertracing/
 # all-in-one Deployment (collector + in-memory storage + query API + UI),

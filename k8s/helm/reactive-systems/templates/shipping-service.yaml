@@ -15,6 +15,7 @@ spec:
       labels:
         app: shipping-service
     spec:
+      {{- include "reactive-systems.imagePullSecrets" . | nindent 6 }}
       initContainers:
         - name: wait-for-mongo-kafka
           image: busybox:1.36
@@ -34,3 +35,5 @@ spec:
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           env:
             {{- include "reactive-systems.mongoUriEnv" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.appResources.jvmLight | nindent 12 }}
