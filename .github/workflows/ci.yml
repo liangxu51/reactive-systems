@@ -181,9 +181,23 @@ jobs:
       # fires (daily at 02:00) - never within this job's lifetime, so the
       # PVC sits Pending forever and `helm --wait` (which waits on every
       # PVC in the release, not just ones with a running consumer) blocked
-      # until the 5m timeout: "resource PersistentVolumeClaim/.../
+      # until the timeout: "resource PersistentVolumeClaim/.../
       # mongo-backup-data not ready ... PVC is not Bound". A CI smoke test
       # doesn't need scheduled backups running anyway.
+      #
+      # --timeout 10m (not 5m): confirmed live, a fresh kind cluster starts
+      # from zero cached images every run - it has to cold-pull and boot
+      # the entire chart at once (kube-prometheus-stack, loki-stack,
+      # Jaeger, three exporters, 3-broker Kafka, 3-member MongoDB, five app
+      # images) inside whatever window is given. The first real run hit
+      # exactly this: "resource Deployment/reactive-systems/
+      # reactive-systems-grafana not ready. status: InProgress, message:
+      # Available: 0/1" after running for 5m19s - not a crash, just still
+      # migrating its SQLite DB (a slow step under CPU contention, also
+      # observed directly on this project's own dev cluster) when the 5m
+      # budget ran out. A cold kind cluster needs more headroom than
+      # deploy-target's already-longer 10m below, not less, since it never
+      # gets a warm image cache across runs.
       - name: Deploy chart
         run: |
           helm upgrade --install reactive-systems k8s/helm/reactive-systems \
@@ -200,7 +214,7 @@ jobs:
             --set shippingService.image.tag=${{ github.sha }} \
             --set frontend.image.repository="$REGISTRY/frontend" \
             --set frontend.image.tag=${{ github.sha }} \
-            --atomic --wait --timeout 5m
+            --atomic --wait --timeout 10m
 
       # Beyond "pods reported Ready" - proves order-service is actually
       # serving through the cluster network, not just that its TCP
