@@ -1,0 +1,43 @@
+# Wires Jaeger (#46) into the same Grafana as a queryable datasource, using
+# the exact same self-registering ConfigMap mechanism loki-stack's own
+# templates/datasources.yaml uses (grafana_datasource: "1" label,
+# auto-discovered by kube-prometheus-stack's Grafana sidecar - see the Helm
+# chart README's "Centralized logging" section for the two-sidecars
+# explanation). Jaeger's all-in-one image serves its query API on the same
+# port as its UI (jaeger.uiPort), so no separate query Service is needed.
+{{- if index .Values "kube-prometheus-stack" "enabled" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: reactive-systems-jaeger-datasource
+  labels:
+    grafana_datasource: "1"
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+data:
+  jaeger-datasource.yaml: |-
+    apiVersion: 1
+    datasources:
+      - name: Jaeger
+        type: jaeger
+        access: proxy
+        url: http://jaeger:{{ .Values.jaeger.uiPort }}
+        # Fixed uid, not auto-generated - see values.yaml's loki-stack.loki.
+        # datasource.uid comment for why an unpinned uid broke the Loki log
+        # panels (Grafana 11.4 doesn't resolve a dashboard JSON panel's
+        # {"uid": null} to "whichever datasource matches this type").
+        uid: jaeger
+        isDefault: false
+        jsonData:
+          # "Logs for this span" in the trace view runs this LogQL query
+          # against Loki (already wired in as datasource uid "loki") -
+          # traceId is a parsed JSON field there, not a label (#47/#54), so
+          # this mirrors the same `| json | traceId="..."` pattern the Helm
+          # chart README's "Centralized logging" section documents for
+          # manual cross-service trace lookups.
+          tracesToLogsV2:
+            datasourceUid: loki
+            filterByTraceID: false
+            filterBySpanID: false
+            customQuery: true
+            query: '{service=~".+"} | json | traceId="${__trace.traceId}"'
+{{- end }}
