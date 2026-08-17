@@ -132,6 +132,25 @@ data:
               "legendFormat": "p99"
             }
           ]
+        },
+        {
+          "id": 9,
+          "title": "Recent order-service traces (Jaeger, #46)",
+          "type": "traces",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 32 },
+          "datasource": { "type": "jaeger", "uid": "jaeger" },
+          "targets": [
+            {
+              "refId": "A",
+              "queryType": "search",
+              "service": "order-service",
+              "operation": "",
+              "tags": "",
+              "minDuration": "",
+              "maxDuration": "",
+              "limit": 20
+            }
+          ]
         }
       ]
     }
