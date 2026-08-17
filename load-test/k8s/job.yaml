@@ -1,0 +1,54 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k6-order-saga-load-test
+  namespace: reactive-systems
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: k6
+          image: grafana/k6:0.54.0
+          args:
+            - run
+            - --out
+            - experimental-prometheus-rw
+            - /scripts/order-saga.js
+          env:
+            - name: BASE_URL
+              value: http://order-service:8080
+            - name: API_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: api-credentials
+                  key: username
+            - name: API_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: api-credentials
+                  key: password
+            - name: K6_PROMETHEUS_RW_SERVER_URL
+              value: http://reactive-systems-kube-prom-prometheus:9090/api/v1/write
+            - name: K6_PROMETHEUS_RW_TREND_STATS
+              value: "p(95),p(99),min,max"
+            # Overridable at apply time, e.g. `kubectl set env job/... TARGET_VUS=50`
+            # before `kubectl create -f` (Jobs are immutable once created) or by
+            # editing this file directly.
+            - name: TARGET_VUS
+              value: "10"
+            - name: RAMP_UP
+              value: 30s
+            - name: HOLD
+              value: 2m
+            - name: RAMP_DOWN
+              value: 30s
+          volumeMounts:
+            - name: k6-script
+              mountPath: /scripts
+      volumes:
+        - name: k6-script
+          configMap:
+            name: k6-order-saga-script

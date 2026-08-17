@@ -239,6 +239,11 @@ kube-prometheus-stack:
       serviceMonitorSelectorNilUsesHelmValues: false
       podMonitorSelectorNilUsesHelmValues: false
       ruleSelectorNilUsesHelmValues: false
+      # Lets k6 (see load-test/) push its own request-rate/latency series
+      # straight into this same Prometheus via --out experimental-prometheus-rw,
+      # so load-test results sit alongside the app's own metrics in Grafana
+      # instead of a separate tool's disconnected report.
+      enableRemoteWriteReceiver: true
   alertmanager:
     enabled: true
     # No Slack/PagerDuty/email credential exists anywhere in this repo -
