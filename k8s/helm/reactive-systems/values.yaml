@@ -239,6 +239,11 @@ kube-prometheus-stack:
       serviceMonitorSelectorNilUsesHelmValues: false
       podMonitorSelectorNilUsesHelmValues: false
       ruleSelectorNilUsesHelmValues: false
+      # Lets k6 (see load-test/) push its own request-rate/latency series
+      # straight into this same Prometheus via --out experimental-prometheus-rw,
+      # so load-test results sit alongside the app's own metrics in Grafana
+      # instead of a separate tool's disconnected report.
+      enableRemoteWriteReceiver: true
   alertmanager:
     enabled: true
     # No Slack/PagerDuty/email credential exists anywhere in this repo -
@@ -318,6 +323,17 @@ loki-stack:
     # simply because Grafana was already up before Loki's ConfigMap first
     # appeared - same failure, just order-dependent instead of guaranteed.
     isDefault: false
+    # Without an explicit uid, Grafana auto-generates a random one on first
+    # provisioning - fine on its own, but grafana-dashboards.yaml's two Loki
+    # panels need a fixed uid to target, and Grafana 11.4's dashboard JSON
+    # doesn't resolve `"datasource": {"type": "loki", "uid": null}` to
+    # "whichever datasource matches this type" the way older versions did.
+    # Confirmed live: with uid left null, both Loki panels silently queried
+    # the default datasource (Prometheus) instead - LogQL against Prometheus
+    # returns no results, so the panels just showed "No data" with no
+    # obvious error pointing at the real cause.
+    datasource:
+      uid: loki
     # Pinned up from the loki subchart's own default (2.6.1, from July
     # 2022) to match loki-stack's own declared appVersion. Confirmed live:
     # Grafana's Explore view auto-fires a "logs volume" supporting query
