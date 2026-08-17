@@ -3,7 +3,7 @@ name: reactive-systems
 description: Helm chart for the reactive order-processing pipeline (order, inventory, shipping services, Kafka, MongoDB, frontend), intended for local minikube use.
 type: application
 version: 0.1.0
-appVersion: "0.0.5"
+appVersion: "0.0.6"
 dependencies:
   # Monitoring & alerting (#55) - Prometheus Operator + Grafana + Alertmanager
   # + kube-state-metrics + node-exporter, bundled. Replaces the hand-rolled

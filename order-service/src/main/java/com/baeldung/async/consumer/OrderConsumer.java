@@ -5,15 +5,19 @@ import java.util.Set;
 
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 
 import com.baeldung.async.producer.OrderProducer;
 import com.baeldung.constants.OrderStatus;
 import com.baeldung.domain.Order;
+import com.baeldung.domain.ProcessedEvent;
 import com.baeldung.reactive.repository.OrderRepository;
+import com.baeldung.reactive.repository.ProcessedEventRepository;
 
 import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
 
 @Slf4j
 @Service
@@ -36,6 +40,9 @@ public class OrderConsumer {
     @Autowired
     private OrderProducer orderProducer;
 
+    @Autowired
+    private ProcessedEventRepository processedEventRepository;
+
     @KafkaListener(topics = "orders", groupId = "orders")
     public void consume(Order order) {
         String orderId = order.getId().toHexString();
@@ -47,13 +54,25 @@ public class OrderConsumer {
         try (var ignored = MDC.putCloseable("orderId", orderId)) {
             log.info("Order received to process: {}", order);
         }
-        orderRepository.findById(order.getId())
-            .map(o -> o.setOrderStatus(order.getOrderStatus())
-                .setResponseMessage(order.getResponseMessage()))
-            .flatMap(orderRepository::save)
+        // Issue #48: dedup insert first, keyed on (orderId, status) - the Mongo status save
+        // below is idempotent-by-value on its own, but a redelivered message's re-publish to
+        // NEXT_STATUS is not (a redelivered INVENTORY_SUCCESS would double-fire
+        // PREPARE_SHIPPING, a redelivered SHIPPING_FAILURE would double-fire REVERT_INVENTORY).
+        String dedupId = orderId + ":" + order.getOrderStatus();
+        processedEventRepository.insert(new ProcessedEvent(dedupId))
+            .then(orderRepository.findById(order.getId())
+                .map(o -> o.setOrderStatus(order.getOrderStatus())
+                    .setResponseMessage(order.getResponseMessage()))
+                .flatMap(orderRepository::save))
+            .onErrorResume(DuplicateKeyException.class, e -> Mono.empty())
             .subscribe(
                 saved -> {
                     try (var ignored = MDC.putCloseable("orderId", orderId)) {
+                        if (saved == null) {
+                            log.info("Duplicate {} event for order {}, already processed - skipping.",
+                                order.getOrderStatus(), order.getId());
+                            return;
+                        }
                         if (UNRECOVERABLE_STATUSES.contains(order.getOrderStatus())) {
                             log.error("Order {} reached unrecoverable status {} with no compensating action: {}",
                                 order.getId(), order.getOrderStatus(), order.getResponseMessage());

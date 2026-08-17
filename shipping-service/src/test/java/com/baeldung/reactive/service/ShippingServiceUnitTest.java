@@ -2,6 +2,7 @@ package com.baeldung.reactive.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -11,17 +12,21 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Date;
 
+import org.bson.types.ObjectId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DuplicateKeyException;
 
 import com.baeldung.constants.OrderStatus;
 import com.baeldung.domain.Address;
 import com.baeldung.domain.Order;
+import com.baeldung.domain.ProcessedEvent;
 import com.baeldung.domain.Shipment;
+import com.baeldung.reactive.repository.ProcessedEventRepository;
 import com.baeldung.reactive.repository.ShipmentRepository;
 
 import reactor.core.publisher.Mono;
@@ -35,6 +40,9 @@ class ShippingServiceUnitTest {
     @Mock
     private ShipmentRepository shipmentRepository;
 
+    @Mock
+    private ProcessedEventRepository processedEventRepository;
+
     @InjectMocks
     private ShippingService shippingService;
 
@@ -43,7 +51,12 @@ class ShippingServiceUnitTest {
     @BeforeEach
     void setUp() {
         order = new Order().setOrderStatus(OrderStatus.PREPARE_SHIPPING);
+        order.setId(new ObjectId());
         order.setShippingAddress(new Address());
+
+        // lenient: the duplicate-event test below overrides this with an error stub,
+        // which would otherwise make Mockito's strict stubbing flag this one as unused there.
+        lenient().when(processedEventRepository.insert(any(ProcessedEvent.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
     }
 
     @Test
@@ -94,6 +107,23 @@ class ShippingServiceUnitTest {
 
         StepVerifier.create(shippingService.handleOrder(order))
             .expectErrorMessage("The current time is off the limits to place order.")
+            .verify();
+
+        verify(shipmentRepository, never()).save(any(Shipment.class));
+    }
+
+    @Test
+    void givenDuplicatePrepareShippingEvent_whenHandleOrder_thenErrorsWithDuplicateKeyAndNoShipmentSaved() {
+        LocalDate today = LocalDate.of(2026, 7, 9);
+        shippingService.clock = Clock.fixed(today.atTime(12, 0).atZone(ZONE).toInstant(), ZONE);
+
+        when(processedEventRepository.insert(any(ProcessedEvent.class))).thenReturn(Mono.error(new DuplicateKeyException("duplicate key")));
+
+        // Deliberately NOT resumed to empty here - see OrderConsumer, which catches this
+        // *after* handleOrder returns, outside the @Transactional boundary. Catching it
+        // inside would make Spring attempt to commit an already-aborted Mongo transaction.
+        StepVerifier.create(shippingService.handleOrder(order))
+            .expectError(DuplicateKeyException.class)
             .verify();
 
         verify(shipmentRepository, never()).save(any(Shipment.class));
