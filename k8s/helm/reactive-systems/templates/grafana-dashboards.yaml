@@ -98,6 +98,40 @@ data:
               "expr": "sum by (service) (rate({service=~\".+\", level=\"ERROR\"}[5m]))"
             }
           ]
+        },
+        {
+          "id": 7,
+          "title": "k6 load test: request rate & VUs (load-test/)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+          "datasource": null,
+          "targets": [
+            {
+              "expr": "rate(k6_http_reqs_total[1m])",
+              "legendFormat": "requests/sec"
+            },
+            {
+              "expr": "k6_vus",
+              "legendFormat": "active VUs"
+            }
+          ]
+        },
+        {
+          "id": 8,
+          "title": "k6 load test: order create latency (load-test/)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+          "datasource": null,
+          "targets": [
+            {
+              "expr": "k6_order_create_duration_p95",
+              "legendFormat": "p95"
+            },
+            {
+              "expr": "k6_order_create_duration_p99",
+              "legendFormat": "p99"
+            }
+          ]
         }
       ]
     }
