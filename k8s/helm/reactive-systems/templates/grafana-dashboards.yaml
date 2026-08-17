@@ -80,7 +80,7 @@ data:
           "title": "Log volume by service (#54)",
           "type": "timeseries",
           "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
-          "datasource": { "type": "loki", "uid": null },
+          "datasource": { "type": "loki", "uid": "loki" },
           "targets": [
             {
               "expr": "sum by (service) (count_over_time({service=~\".+\"}[1m]))"
@@ -92,7 +92,7 @@ data:
           "title": "ERROR log rate by service (#54)",
           "type": "timeseries",
           "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
-          "datasource": { "type": "loki", "uid": null },
+          "datasource": { "type": "loki", "uid": "loki" },
           "targets": [
             {
               "expr": "sum by (service) (rate({service=~\".+\", level=\"ERROR\"}[5m]))"
