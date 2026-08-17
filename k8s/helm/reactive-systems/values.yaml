@@ -308,6 +308,16 @@ monitoringRules:
 loki-stack:
   enabled: true
   loki:
+    # The loki-stack chart's own default is `isDefault: true`, which
+    # collides with kube-prometheus-stack's Grafana datasource ConfigMap
+    # (Prometheus, also `isDefault: true`) - Grafana's provisioning step
+    # rejects two defaults in one org and exits 1, crash-looping forever.
+    # Confirmed live: a fresh `helm install` hits this deterministically
+    # (both datasource ConfigMaps exist before Grafana's first boot), while
+    # an existing release upgraded incrementally can end up running fine
+    # simply because Grafana was already up before Loki's ConfigMap first
+    # appeared - same failure, just order-dependent instead of guaranteed.
+    isDefault: false
     # Pinned up from the loki subchart's own default (2.6.1, from July
     # 2022) to match loki-stack's own declared appVersion. Confirmed live:
     # Grafana's Explore view auto-fires a "logs volume" supporting query
