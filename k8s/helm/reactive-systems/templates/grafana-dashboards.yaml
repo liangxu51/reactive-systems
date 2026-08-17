@@ -5,6 +5,17 @@
 # stays scoped to this app's own signals. Log panels (#54, Loki) are folded
 # into this same dashboard rather than a second one, since both metrics and
 # logs share this one Grafana.
+#
+# The Jaeger panel (id 9) is deliberately "table", not "traces": confirmed
+# live via an actual headless-browser render (not just checking the API
+# response) that Grafana's core "traces" panel type expects a single
+# trace's spans, not a multi-trace search-result list - given a `search`
+# queryType's response, it silently showed "No data found in response"
+# even though the underlying request succeeded with real data. Also
+# filtered to the `http post /api/orders` operation specifically - without
+# it, the panel's top 20 results were dominated by Prometheus's own
+# /actuator/prometheus scrape spans (every ~30s) rather than the saga's
+# actual entry point.
 {{- if index .Values "kube-prometheus-stack" "enabled" }}
 apiVersion: v1
 kind: ConfigMap
@@ -135,8 +146,8 @@ data:
         },
         {
           "id": 9,
-          "title": "Recent order-service traces (Jaeger, #46)",
-          "type": "traces",
+          "title": "Recent POST /api/orders traces (Jaeger, #46)",
+          "type": "table",
           "gridPos": { "h": 8, "w": 24, "x": 0, "y": 32 },
           "datasource": { "type": "jaeger", "uid": "jaeger" },
           "targets": [
@@ -144,7 +155,7 @@ data:
               "refId": "A",
               "queryType": "search",
               "service": "order-service",
-              "operation": "",
+              "operation": "http post /api/orders",
               "tags": "",
               "minDuration": "",
               "maxDuration": "",
