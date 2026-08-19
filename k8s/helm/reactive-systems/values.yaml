@@ -367,8 +367,20 @@ loki-stack:
         - url: http://reactive-systems-loki:3100/loki/api/v1/push
       snippets:
         pipelineStages:
-          # Container runtime log framing (default stage, kept).
-          - cri: {}
+          # Container runtime log framing. `docker`, not `cri` - this chart
+          # targets minikube, whose default driver/runtime is Docker
+          # (confirmed via `kubectl get node -o jsonpath='{.status.nodeInfo.
+          # containerRuntimeVersion}'` -> "docker://..."), which writes each
+          # container's log as its own json-file-per-line envelope
+          # ({"log":"<line>","stream":...,"time":...}), not the CRI plaintext
+          # framing (`<ts> <stream> <F/P> <content>`) containerd/CRI-O use.
+          # The `cri` stage silently no-ops against Docker's format, so the
+          # json stage below never finds service.name/log.level at the top
+          # level and the service/level Loki labels never get set (#54's
+          # "Log volume by service" and "ERROR log rate by service" panels
+          # then show no data - confirmed live: Loki had zero `service`
+          # label values before this fix).
+          - docker: {}
           # Logs are already flat ECS JSON (#47) - no grok/regex needed,
           # just parse the fields worth promoting to Loki labels for
           # correlation with Jaeger traces (traceId/spanId) and the order
