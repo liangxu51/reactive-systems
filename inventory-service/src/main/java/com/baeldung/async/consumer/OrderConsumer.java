@@ -5,6 +5,7 @@ import java.time.Duration;
 
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 
@@ -15,6 +16,7 @@ import com.baeldung.reactive.service.ProductService;
 import com.mongodb.MongoException;
 
 import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
 @Slf4j
@@ -50,9 +52,24 @@ public class OrderConsumer {
             log.info("Order received to process: {}", order);
             if (OrderStatus.RESERVE_INVENTORY.equals(order.getOrderStatus())) {
                 productService.handleOrder(order)
+                    // Issue #48: must sit before retryWhen, not inside ProductService's
+                    // @Transactional method - see the comment on handleOrder there for why
+                    // catching this inside the transaction breaks (Spring attempts to COMMIT
+                    // an already-aborted transaction, which MongoDB rejects as transient,
+                    // triggering pointless retries here). By the time this operator runs, the
+                    // transaction has already been rolled back cleanly.
+                    .onErrorResume(DuplicateKeyException.class, e -> Mono.empty())
                     .retryWhen(STOCK_CONFLICT_RETRY)
                     .doOnSuccess(o -> {
                         try (var ignored2 = MDC.putCloseable("orderId", orderId)) {
+                            // Issue #48: Mono.empty() (o == null on a Mono<Order>'s
+                            // doOnSuccess) means the dedup check in ProductService
+                            // caught a redelivered message - already handled, nothing
+                            // to publish again.
+                            if (o == null) {
+                                log.info("Duplicate RESERVE_INVENTORY for order {}, already processed - skipping.", order.getId());
+                                return;
+                            }
                             log.info("Order processed succesfully.");
                             orderProducer.sendMessage(order.setOrderStatus(OrderStatus.INVENTORY_SUCCESS));
                         }
@@ -73,9 +90,17 @@ public class OrderConsumer {
                     });
             } else if (OrderStatus.REVERT_INVENTORY.equals(order.getOrderStatus())) {
                 productService.revertOrder(order)
+                    // Issue #48: see the matching comment on the RESERVE_INVENTORY branch above.
+                    .onErrorResume(DuplicateKeyException.class, e -> Mono.empty())
                     .retryWhen(STOCK_CONFLICT_RETRY)
                     .doOnSuccess(o -> {
                         try (var ignored2 = MDC.putCloseable("orderId", orderId)) {
+                            // Issue #48: see the matching comment on the RESERVE_INVENTORY
+                            // branch above.
+                            if (o == null) {
+                                log.info("Duplicate REVERT_INVENTORY for order {}, already processed - skipping.", order.getId());
+                                return;
+                            }
                             log.info("Order reverted succesfully.");
                             orderProducer.sendMessage(order.setOrderStatus(OrderStatus.INVENTORY_REVERT_SUCCESS));
                         }
