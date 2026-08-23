@@ -12,8 +12,9 @@ namespace OrderService.Api.Domain;
 /// the shared database.
 ///
 /// The TTL index (604800s, matching the Java @Indexed(expireAfterSeconds =
-/// 604800)) is created at startup by Task 2 - this type only defines the
-/// document shape.
+/// 604800)) is created against the "ProcessedAt" field in
+/// ProcessedEventRepository's constructor (see Repositories/ProcessedEventRepository.cs)
+/// - this type only defines the document shape.
 /// </summary>
 public class ProcessedEvent
 {

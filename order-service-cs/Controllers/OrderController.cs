@@ -87,16 +87,37 @@ public class OrderController : ControllerBase
     /// Flux): it completes and closes the connection once every order has
     /// been sent, which useOrderStream.js's onerror handler already accounts
     /// for.
+    ///
+    /// A mid-stream client disconnect (e.g. the browser tab closing, or
+    /// useOrderStream.js's cleanup effect calling EventSource.close())
+    /// cancels <see cref="HttpContext.RequestAborted"/>, which
+    /// WriteAsync/FlushAsync then observe and throw
+    /// OperationCanceledException from. Left uncaught, that exception
+    /// reaches GlobalExceptionFilter, which tries to write an error result
+    /// onto a response that has already started streaming - itself throwing
+    /// a second exception and logging a spurious ERROR-level line for what
+    /// is actually a routine, healthy disconnect (and one the "ERROR log
+    /// rate by service" Grafana panel would then count). Caught here
+    /// instead, quietly: a disconnect is normal SSE lifecycle, not a
+    /// failure.
     /// </summary>
     private async Task WriteEventStreamAsync(List<Order> orders, CancellationToken cancellationToken)
     {
         Response.ContentType = "text/event-stream";
 
-        foreach (var order in orders)
+        try
         {
-            var json = JsonSerializer.Serialize(order, OrderJsonOptions.Default);
-            await Response.WriteAsync($"data: {json}\n\n", cancellationToken).ConfigureAwait(false);
-            await Response.Body.FlushAsync(cancellationToken).ConfigureAwait(false);
+            foreach (var order in orders)
+            {
+                var json = JsonSerializer.Serialize(order, OrderJsonOptions.Default);
+                await Response.WriteAsync($"data: {json}\n\n", cancellationToken).ConfigureAwait(false);
+                await Response.Body.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            // Client disconnected mid-stream - nothing left to write to and
+            // nothing to report; just stop.
         }
     }
 

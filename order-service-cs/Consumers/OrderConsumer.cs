@@ -89,49 +89,74 @@ public sealed class OrderConsumer : BackgroundService
             AutoOffsetReset = AutoOffsetReset.Latest,
         };
 
-        using var consumer = new ConsumerBuilder<string, string>(config).Build();
-        consumer.Subscribe(Topic);
-
-        try
+        // Outer envelope: Build()/Subscribe() used to sit outside any
+        // try/catch, so a throw during consumer construction/subscription
+        // (e.g. a transient broker-unreachable error) would fault this
+        // worker's Task entirely - Task.WhenAll in ExecuteAsync only
+        // completes once every worker's Task completes, so that failure
+        // would otherwise silently degrade the pipeline from 6 workers to
+        // fewer, invisible until the whole BackgroundService shuts down.
+        // This loop re-attempts setup (with the same RetryBackoff used
+        // below) instead of letting that happen, without changing anything
+        // about the inner consume/retry/DLT logic.
+        while (!stoppingToken.IsCancellationRequested)
         {
-            while (!stoppingToken.IsCancellationRequested)
+            try
             {
+                using var consumer = new ConsumerBuilder<string, string>(config).Build();
+                consumer.Subscribe(Topic);
+
                 try
                 {
-                    var result = consumer.Consume(stoppingToken);
-                    if (result?.Message is null)
+                    while (!stoppingToken.IsCancellationRequested)
                     {
-                        continue;
-                    }
+                        try
+                        {
+                            var result = consumer.Consume(stoppingToken);
+                            if (result?.Message is null)
+                            {
+                                continue;
+                            }
 
-                    ProcessWithRetry(result, stoppingToken);
-                    consumer.Commit(result);
+                            ProcessWithRetry(result, stoppingToken);
+                            consumer.Commit(result);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            // Cancellation is the only reason this loop should end -
+                            // stoppingToken.IsCancellationRequested is now true, so
+                            // the while condition above ends the loop.
+                        }
+                        catch (Exception ex)
+                        {
+                            // A transient broker/coordinator hiccup - from Consume,
+                            // from Commit, or from an exception escaping
+                            // ProcessWithRetry's own DLT-publish catch block - must
+                            // not permanently kill this worker. Log and keep
+                            // polling; only cancellation ends the loop.
+                            _logger.LogError(ex, "Unhandled error in consume loop for topic {Topic} - continuing", Topic);
+                        }
+                    }
                 }
-                catch (OperationCanceledException)
+                finally
                 {
-                    // Cancellation is the only reason this loop should end -
-                    // stoppingToken.IsCancellationRequested is now true, so
-                    // the while condition above ends the loop.
-                }
-                catch (Exception ex)
-                {
-                    // A transient broker/coordinator hiccup - from Consume,
-                    // from Commit, or from an exception escaping
-                    // ProcessWithRetry's own DLT-publish catch block - must
-                    // not permanently kill this worker. Task.WhenAll in
-                    // ExecuteAsync only completes once every worker's Task
-                    // completes, so an unhandled fault here would otherwise
-                    // silently degrade the pipeline from 6 workers to fewer,
-                    // invisible until the whole BackgroundService shuts
-                    // down. Log and keep polling; only cancellation ends the
-                    // loop.
-                    _logger.LogError(ex, "Unhandled error in consume loop for topic {Topic} - continuing", Topic);
+                    consumer.Close();
                 }
             }
-        }
-        finally
-        {
-            consumer.Close();
+            catch (OperationCanceledException)
+            {
+                // stoppingToken.IsCancellationRequested is now true, so the
+                // outer while condition ends the loop.
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Failed to create/subscribe Kafka consumer for topic {Topic} - retrying in {Backoff}",
+                    Topic,
+                    RetryBackoff);
+                stoppingToken.WaitHandle.WaitOne(RetryBackoff);
+            }
         }
     }
 
@@ -142,8 +167,22 @@ public sealed class OrderConsumer : BackgroundService
     /// forwards the raw failing message - unmodified - to
     /// <see cref="DeadLetterTopic"/> so the caller can still commit the
     /// offset and move on instead of retrying forever.
+    ///
+    /// A genuine shutdown cancellation is deliberately NOT treated as a
+    /// retryable/DLT-worthy failure (see the dedicated catch clause below):
+    /// without it, an in-flight HandleAsync call that observes
+    /// stoppingToken being cancelled (e.g. via the Mongo driver honoring the
+    /// token) would throw OperationCanceledException, get caught by the
+    /// generic retry catch, sleep, retry, fail again for the same reason
+    /// (shutdown is still in progress), and on the final attempt get
+    /// forwarded to the dead-letter topic with its offset committed - dead-
+    /// lettering a perfectly healthy, valid message purely because the
+    /// process happened to be shutting down mid-processing.
+    /// Internal (not private) so order-service-cs.Tests can exercise the
+    /// retry/DLT/cancellation envelope directly against mocked dependencies,
+    /// without a real IConsumer/Kafka broker.
     /// </summary>
-    private void ProcessWithRetry(ConsumeResult<string, string> result, CancellationToken stoppingToken)
+    internal void ProcessWithRetry(ConsumeResult<string, string> result, CancellationToken stoppingToken)
     {
         // One span per consumed message (covering every retry attempt and,
         // on exhaustion, the DLT forward) - matches order-service (Java)'s
@@ -164,6 +203,18 @@ public sealed class OrderConsumer : BackgroundService
                 _handler.HandleAsync(order, stoppingToken).GetAwaiter().GetResult();
                 return;
             }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                // Genuine shutdown, not a poison-pill message - propagate so
+                // RunConsumeLoop's own cancellation handling takes over
+                // instead of retrying/dead-lettering. The offset must NOT be
+                // committed here - the caller's Commit(result) call never
+                // runs because this throw unwinds past it - so the message
+                // is left for redelivery, the correct at-least-once
+                // behavior for a message that was never actually fully
+                // processed.
+                throw;
+            }
             catch (Exception ex) when (attempt < MaxAttempts)
             {
                 _logger.LogWarning(
@@ -173,7 +224,10 @@ public sealed class OrderConsumer : BackgroundService
                     MaxAttempts,
                     result.Message.Key,
                     RetryBackoff);
-                Thread.Sleep(RetryBackoff);
+                // WaitHandle.WaitOne (not Thread.Sleep) so a cancellation
+                // during the backoff wait is noticed immediately instead of
+                // blocking the full backoff duration regardless of shutdown.
+                stoppingToken.WaitHandle.WaitOne(RetryBackoff);
             }
             catch (Exception ex)
             {

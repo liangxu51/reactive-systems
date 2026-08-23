@@ -30,6 +30,13 @@ docker build -t order-service:$TAG order-service
 docker build -t inventory-service:$TAG inventory-service
 docker build -t shipping-service:$TAG shipping-service
 
+# order-service-cs (C#/.NET) is the chart's default enabled order-service
+# variant (orderServiceCs.enabled: true) - build it too, or `helm install`
+# below schedules a pod for an image that was never built. Unlike the Java
+# services, its Dockerfile does its own `dotnet publish` build internally,
+# so no separate `dotnet build`/`dotnet publish` step is needed here.
+docker build -t order-service-cs:$TAG order-service-cs
+
 cd frontend && npm ci && npm run build && cd ..
 docker build -t frontend:$TAG frontend
 ```
@@ -39,9 +46,11 @@ routines::unsupported` — this Angular 9 project uses a webpack version that
 needs OpenSSL's legacy provider: prefix the build with
 `NODE_OPTIONS=--openssl-legacy-provider`.)
 
-(To use the virtual-thread `order-service-vt` module instead, also run
-`mvn clean package -pl order-service-vt` and
-`docker build -t order-service-vt:$TAG order-service-vt`.)
+(To use the Java `order-service` module or its virtual-thread
+`order-service-vt` sibling instead of the default `order-service-cs`, also
+run `mvn clean package -pl order-service-vt` and
+`docker build -t order-service-vt:$TAG order-service-vt` - `order-service`
+itself is already built by the `mvn` command above.)
 
 Each service's `image.tag` in `values.yaml` defaults to empty, which falls
 back to `Chart.yaml`'s `appVersion` at install/upgrade time. To rebuild just
@@ -73,19 +82,32 @@ kubectl apply --server-side -f /tmp/kube-prometheus-stack/charts/crds/crds/
 ```
 
 Installed into its own namespace so it doesn't mix with anything else
-already running on the cluster:
+already running on the cluster. This installs `order-service-cs` (C#/.NET),
+the chart's default enabled order-service variant:
 
 ```bash
 helm install reactive-systems k8s/helm/reactive-systems \
   --namespace reactive-systems --create-namespace
 ```
 
-To run `order-service-vt` instead of `order-service`:
+`orderService` (Java), `orderServiceVt` (Java, virtual threads), and
+`orderServiceCs` (C#/.NET) are three mutually-exclusive alternatives - each
+Deployment's template `fail`s the render if more than one is enabled, since
+all three would otherwise consume/produce on the same Kafka topic and Mongo
+collection. To run one of the Java variants instead, disable `orderServiceCs`
+and enable the one you want:
 
 ```bash
+# order-service (Java)
 helm install reactive-systems k8s/helm/reactive-systems \
   --namespace reactive-systems --create-namespace \
-  --set orderService.enabled=false \
+  --set orderServiceCs.enabled=false \
+  --set orderService.enabled=true
+
+# order-service-vt (Java, virtual threads)
+helm install reactive-systems k8s/helm/reactive-systems \
+  --namespace reactive-systems --create-namespace \
+  --set orderServiceCs.enabled=false \
   --set orderServiceVt.enabled=true
 ```
 
@@ -154,9 +176,13 @@ db.product.insertMany([
   ```bash
   kubectl get secret mongo-credentials -n reactive-systems -o jsonpath='{.data.root-password}' | base64 -d
   ```
-- `order-service` and `order-service-vt` are mutually exclusive, mirroring
-  the `order-service` / `order-service-vt` docker-compose profiles — both
+- `order-service`, `order-service-vt`, and `order-service-cs` are three
+  mutually-exclusive alternatives (only one `orderService*.enabled` may be
+  `true` at a time - each Deployment template `fail`s the chart render
+  otherwise), mirroring the `order-service` / `order-service-vt` /
+  `order-service-cs` docker-compose profiles — all three would otherwise
   consume/produce against the same Kafka topic and Mongo collection.
+  `order-service-cs` is the chart's default enabled variant.
 - `shipping-service` has no `spring-boot-starter-webflux` dependency (unlike
   the other two services), so it never opens an HTTP port — it's a pure
   Kafka consumer/producer. Its Deployment intentionally has no Service,
@@ -373,10 +399,16 @@ way any future service in this repo would opt into scraping.
 
 What's scraped:
 
-- `order-service`/`order-service-vt` and `inventory-service` via their
-  existing `/actuator/prometheus` endpoints (unchanged from #44), now
-  through a `ServiceMonitor` with `basicAuth` pointed at the `api-credentials`
-  Secret instead of a mounted `password_file`.
+- Whichever `order-service`/`order-service-vt`/`order-service-cs` variant is
+  currently enabled, plus `inventory-service`, via their existing
+  `/actuator/prometheus` endpoints (unchanged from #44 for the Java
+  variants; `order-service-cs` exposes its own equivalent endpoint at the
+  same path), now through a `ServiceMonitor` with `basicAuth` pointed at the
+  `api-credentials` Secret instead of a mounted `password_file`. All three
+  order-service variants share one Service name and `monitoring:
+  order-service` label (see `order-service-cs.yaml`), so this one
+  `ServiceMonitor` covers whichever is active with no per-variant
+  duplication.
 - `kafka-lag-exporter` (#44, consumer-group lag - unchanged).
 - `mongodb-exporter` (new) - one `percona/mongodb_exporter` instance
   covering the whole `rs0` replica set (connects via all three per-pod DNS
@@ -484,10 +516,13 @@ dashboards instead of duplicating that here.
 
 ## Distributed tracing across the Kafka saga (#46)
 
-`order-service`, `order-service-vt`, `inventory-service`, and
-`shipping-service` all export spans to a single `jaeger` all-in-one
-Deployment (see `jaeger.yaml`) over OTLP. Nothing hand-wires the trace
-context through the "orders" record's headers - Spring Kafka's built-in
+`order-service`/`order-service-vt`/`order-service-cs` (whichever is
+enabled), `inventory-service`, and `shipping-service` all export spans to a
+single `jaeger` all-in-one Deployment (see `jaeger.yaml`) over OTLP -
+`order-service-cs` does this via the OpenTelemetry .NET SDK's own OTLP
+exporter rather than Spring's, but targets the same `jaeger` Service.
+Nothing hand-wires the trace context through the "orders" record's headers
+for the Java services - Spring Kafka's built-in
 Observation support does it automatically once
 `spring.kafka.template.observation-enabled` /
 `spring.kafka.listener.observation-enabled` are on, because
@@ -504,9 +539,12 @@ Reach the UI with:
 kubectl port-forward -n reactive-systems svc/jaeger 16686:16686
 ```
 
-Then open `http://localhost:16686`, pick a service (`order-service`,
-`inventory-service`, or `shipping-service`), and look for a trace with spans
-from more than one of them - that's a saga crossing the Kafka topic.
+Then open `http://localhost:16686`, pick a service (`order-service` for the
+Java variants, `order-service-cs` if that's the enabled variant - its OTel
+`service.name` resource attribute differs from the Kubernetes Service name
+it shares with the Java variants - plus `inventory-service` and
+`shipping-service`), and look for a trace with spans from more than one of
+them - that's a saga crossing the Kafka topic.
 
 This module (Spring Boot 4.0.7) turned out to have moved or renamed almost
 everything tracing-related since the Spring Boot 3.x docs most guides are

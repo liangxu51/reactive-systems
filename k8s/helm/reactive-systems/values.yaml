@@ -175,13 +175,21 @@ appResources:
   # the baseline/idle figures (requests, memory limit) are lowered. Same
   # "starting point, tune under real traffic" caveat as the other tiers -
   # not a load-tested SLA figure.
+  #
+  # 256Mi (the original limit here) is untested under real load: .NET's
+  # container-aware GC sizes its heap ceiling off this limit, and librdkafka
+  # (native, off-heap) + the Mongo driver's connection pool + OpenTelemetry's
+  # batch span processor are all resident in the same container alongside
+  # it. Raised to 384Mi/96Mi, matching jvmLight's more conservative headroom
+  # style (requests ~1/4 of the limit) now that this is the chart's default
+  # enabled variant, rather than shipping an untested figure as the default.
   dotnet:
     requests:
       cpu: 50m
-      memory: 128Mi
+      memory: 96Mi
     limits:
       cpu: 500m
-      memory: 256Mi
+      memory: 384Mi
 
 # Java/Spring WebFlux reactive baseline. Mutually exclusive with
 # orderServiceVt/orderServiceCs (see the `fail` guards in each of their

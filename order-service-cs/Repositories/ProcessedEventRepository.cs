@@ -25,6 +25,19 @@ public class ProcessedEventRepository : IProcessedEventRepository
     public ProcessedEventRepository(IMongoDatabase database)
     {
         _collection = database.GetCollection<ProcessedEvent>("order_processed_event");
+
+        // TTL index on ProcessedAt (604800s = 7 days), matching Java's
+        // @Indexed(expireAfterSeconds = 604800) +
+        // spring.data.mongodb.auto-index-creation=true. Created here so it
+        // actually runs at startup (this repository is registered as a
+        // singleton and gets resolved while the host is starting, before it
+        // serves any traffic - see Program.cs) rather than merely being
+        // documented as happening somewhere. Creating an index that already
+        // exists with identical options is a safe MongoDB no-op, so this can
+        // run unconditionally on every startup with no guard needed.
+        _collection.Indexes.CreateOne(new CreateIndexModel<ProcessedEvent>(
+            Builders<ProcessedEvent>.IndexKeys.Ascending(e => e.ProcessedAt),
+            new CreateIndexOptions { ExpireAfter = TimeSpan.FromSeconds(604800) }));
     }
 
     /// <summary>
