@@ -117,4 +117,13 @@ public class OrderProducerTests
         Assert.Equal("507f1f77bcf86cd799439011", captured!.Key);
         Assert.Equal(rawValue, captured.Value);
     }
+
+    [Fact]
+    public void CreateProducerConfig_SetsAcksAll_AndGivenBootstrapServers()
+    {
+        var config = OrderProducer.CreateProducerConfig("kafka:9092");
+
+        Assert.Equal(Acks.All, config.Acks);
+        Assert.Equal("kafka:9092", config.BootstrapServers);
+    }
 }

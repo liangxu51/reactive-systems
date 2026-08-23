@@ -36,8 +36,18 @@ public interface IOrderProducer
 /// <summary>
 /// Publishes Order messages to the shared "orders" Kafka topic. Mirrors
 /// com.baeldung.async.producer.OrderProducer in order-service (Java): same
-/// topic, same key (order id as lowercase hex), same acks=all durability,
-/// same fire-and-forget send with an error-only completion callback.
+/// topic, same key (order id as lowercase hex), same fire-and-forget send
+/// with an error-only completion callback. Durability (acks=all, matching
+/// Java's spring.kafka.producer.acks=all) is enforced by
+/// <see cref="CreateProducerConfig"/>/<see cref="CreateProducer"/> below -
+/// an <see cref="OrderProducer"/> only wraps whatever
+/// IProducer&lt;string, string&gt; it is constructed with, so acks=all is a
+/// property of how that producer was built, not of this class itself.
+/// Callers (Task 4's composition root) must build the real producer through
+/// <see cref="CreateProducer"/> to get that guarantee - do not hand-roll a
+/// bare <c>new ProducerBuilder&lt;string, string&gt;(new ProducerConfig
+/// { BootstrapServers = ... })</c> elsewhere without also setting
+/// <c>Acks = Acks.All</c>.
 ///
 /// Wraps a Confluent.Kafka IProducer&lt;string, string&gt; rather than using
 /// its built-in JSON (de)serializer support: the wire bytes must match
@@ -58,6 +68,32 @@ public sealed class OrderProducer : IOrderProducer, IDisposable
         _producer = producer;
         _logger = logger;
     }
+
+    /// <summary>
+    /// Builds the <see cref="ProducerConfig"/> for the real Kafka producer,
+    /// with <c>Acks = Acks.All</c> - matching order-service (Java)'s
+    /// spring.kafka.producer.acks=all (see #40: a produce only completes
+    /// once every in-sync replica has the write, not just the partition
+    /// leader). Exposed separately from <see cref="CreateProducer"/> so the
+    /// config itself (and specifically the acks setting) can be asserted on
+    /// directly in tests without opening a real client connection.
+    /// </summary>
+    public static ProducerConfig CreateProducerConfig(string bootstrapServers) => new()
+    {
+        BootstrapServers = bootstrapServers,
+        Acks = Acks.All,
+    };
+
+    /// <summary>
+    /// Builds the real Confluent.Kafka IProducer&lt;string, string&gt; this
+    /// class should be constructed with, with acks=all applied via
+    /// <see cref="CreateProducerConfig"/>. Not wired into Program.cs yet -
+    /// that composition happens in Task 4 - but the acks=all guarantee lives
+    /// here, in code this task owns, rather than being left as an
+    /// undocumented assumption for a later task to (maybe) get right.
+    /// </summary>
+    public static IProducer<string, string> CreateProducer(string bootstrapServers) =>
+        new ProducerBuilder<string, string>(CreateProducerConfig(bootstrapServers)).Build();
 
     public void SendMessage(Order order)
     {

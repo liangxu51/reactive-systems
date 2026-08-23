@@ -93,28 +93,37 @@ public sealed class OrderConsumer : BackgroundService
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                ConsumeResult<string, string>? result;
                 try
                 {
-                    result = consumer.Consume(stoppingToken);
+                    var result = consumer.Consume(stoppingToken);
+                    if (result?.Message is null)
+                    {
+                        continue;
+                    }
+
+                    ProcessWithRetry(result, stoppingToken);
+                    consumer.Commit(result);
                 }
                 catch (OperationCanceledException)
                 {
-                    break;
+                    // Cancellation is the only reason this loop should end -
+                    // stoppingToken.IsCancellationRequested is now true, so
+                    // the while condition above ends the loop.
                 }
-                catch (ConsumeException ex)
+                catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error consuming from topic {Topic}", Topic);
-                    continue;
+                    // A transient broker/coordinator hiccup - from Consume,
+                    // from Commit, or from an exception escaping
+                    // ProcessWithRetry's own DLT-publish catch block - must
+                    // not permanently kill this worker. Task.WhenAll in
+                    // ExecuteAsync only completes once every worker's Task
+                    // completes, so an unhandled fault here would otherwise
+                    // silently degrade the pipeline from 6 workers to fewer,
+                    // invisible until the whole BackgroundService shuts
+                    // down. Log and keep polling; only cancellation ends the
+                    // loop.
+                    _logger.LogError(ex, "Unhandled error in consume loop for topic {Topic} - continuing", Topic);
                 }
-
-                if (result?.Message is null)
-                {
-                    continue;
-                }
-
-                ProcessWithRetry(result, stoppingToken);
-                consumer.Commit(result);
             }
         }
         finally
