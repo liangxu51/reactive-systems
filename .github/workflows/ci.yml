@@ -26,6 +26,33 @@ jobs:
       - name: Run tests
         run: mvn -B test
 
+  dotnet-tests:
+    name: .NET tests (order-service-cs)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: order-service-cs
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # No `order-service-cs.Tests/OrderService.Api.Tests.csproj` (nor
+      # `order-service-cs`) has a packages.lock.json, and
+      # actions/setup-dotnet's cache option hard-requires one (it errors
+      # out entirely if no lock file is found) - so no `cache:` input here,
+      # unlike java-tests' `cache: maven` above.
+      #
+      # There's no .sln, and running bare `dotnet test` from this directory
+      # only picks up OrderService.Api.csproj (not a test project) and
+      # silently exits 0 having run zero tests - confirmed live. Pointing
+      # explicitly at the test project's .csproj is what actually runs it.
+      - name: Run tests
+        run: dotnet test order-service-cs.Tests/OrderService.Api.Tests.csproj
+
   frontend-build:
     name: Frontend build
     runs-on: ubuntu-latest
@@ -54,7 +81,7 @@ jobs:
   # packages: write on push events for this repo anyway.
   build-and-push:
     name: Build and push images
-    needs: [java-tests, frontend-build]
+    needs: [java-tests, dotnet-tests, frontend-build]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
@@ -92,7 +119,7 @@ jobs:
       - name: Build and push service images
         run: |
           set -euo pipefail
-          for svc in order-service order-service-vt inventory-service shipping-service frontend; do
+          for svc in order-service order-service-cs order-service-vt inventory-service shipping-service frontend; do
             docker build -t "$REGISTRY/$svc:${{ github.sha }}" -t "$REGISTRY/$svc:latest" "$svc"
             docker push "$REGISTRY/$svc:${{ github.sha }}"
             docker push "$REGISTRY/$svc:latest"
@@ -107,7 +134,7 @@ jobs:
         continue-on-error: true
         run: |
           set -uo pipefail
-          for svc in order-service order-service-vt inventory-service shipping-service frontend; do
+          for svc in order-service order-service-cs order-service-vt inventory-service shipping-service frontend; do
             docker run --rm \
               -v /var/run/docker.sock:/var/run/docker.sock \
               aquasec/trivy:latest image \
@@ -206,6 +233,8 @@ jobs:
             --set mongodb.backup.enabled=false \
             --set orderService.image.repository="$REGISTRY/order-service" \
             --set orderService.image.tag=${{ github.sha }} \
+            --set orderServiceCs.image.repository="$REGISTRY/order-service-cs" \
+            --set orderServiceCs.image.tag=${{ github.sha }} \
             --set orderServiceVt.image.repository="$REGISTRY/order-service-vt" \
             --set orderServiceVt.image.tag=${{ github.sha }} \
             --set inventoryService.image.repository="$REGISTRY/inventory-service" \
@@ -310,6 +339,8 @@ jobs:
             --set imagePullSecrets[0].name=ghcr-pull \
             --set orderService.image.repository="$REGISTRY/order-service" \
             --set orderService.image.tag=${{ github.sha }} \
+            --set orderServiceCs.image.repository="$REGISTRY/order-service-cs" \
+            --set orderServiceCs.image.tag=${{ github.sha }} \
             --set orderServiceVt.image.repository="$REGISTRY/order-service-vt" \
             --set orderServiceVt.image.tag=${{ github.sha }} \
             --set inventoryService.image.repository="$REGISTRY/inventory-service" \
