@@ -4,11 +4,21 @@ using OrderService.Api.Domain;
 namespace OrderService.Api.Repositories;
 
 /// <summary>
+/// Seam over <see cref="ProcessedEventRepository"/> so Task 2's OrderConsumer
+/// message handling can be unit tested against a mocked/fake repository
+/// instead of a real MongoDB connection.
+/// </summary>
+public interface IProcessedEventRepository
+{
+    Task InsertAsync(ProcessedEvent processedEvent, CancellationToken cancellationToken = default);
+}
+
+/// <summary>
 /// Thin wrapper over IMongoCollection&lt;ProcessedEvent&gt;, backed by the
 /// explicitly-named "order_processed_event" collection (see ProcessedEvent
 /// for why this must not use the default-derived collection name).
 /// </summary>
-public class ProcessedEventRepository
+public class ProcessedEventRepository : IProcessedEventRepository
 {
     private readonly IMongoCollection<ProcessedEvent> _collection;
 

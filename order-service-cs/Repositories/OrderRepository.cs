@@ -5,12 +5,26 @@ using OrderService.Api.Domain;
 namespace OrderService.Api.Repositories;
 
 /// <summary>
+/// Seam over <see cref="OrderRepository"/> so Task 2's OrderConsumer message
+/// handling can be unit tested against a mocked/fake repository instead of a
+/// real MongoDB connection.
+/// </summary>
+public interface IOrderRepository
+{
+    Task<List<Order>> FindAllAsync(CancellationToken cancellationToken = default);
+
+    Task<Order?> FindByIdAsync(ObjectId id, CancellationToken cancellationToken = default);
+
+    Task<Order> SaveAsync(Order order, CancellationToken cancellationToken = default);
+}
+
+/// <summary>
 /// Thin wrapper over IMongoCollection&lt;Order&gt;, backed by the "order"
 /// collection (Spring Data's default: the decapitalized class name -
 /// matches order-service (Java), which never overrides the collection name
 /// for Order).
 /// </summary>
-public class OrderRepository
+public class OrderRepository : IOrderRepository
 {
     private readonly IMongoCollection<Order> _collection;
 
