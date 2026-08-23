@@ -24,11 +24,17 @@ public class Order
 
     public DateTime? ShippingDate { get; set; }
 
-    // Stored as its member name string in MongoDB (matching Spring Data's
-    // default enum-as-name-string mapping), not the driver's default
-    // integer representation.
+    // Nullable: Java's orderStatus is a nullable reference field, null until
+    // the saga assigns it (e.g. right after a POST, before
+    // OrderService.createOrder sets INITIATION_SUCCESS). A non-nullable C#
+    // enum would silently default to OrderStatus.SUCCESS (ordinal 0) for an
+    // Order that hasn't had its status assigned yet - a behavioral trap for
+    // Task 2's consumer and Task 3's controller/service. Stored as its
+    // member name string in MongoDB (matching Spring Data's default
+    // enum-as-name-string mapping), not the driver's default integer
+    // representation.
     [BsonRepresentation(BsonType.String)]
-    public OrderStatus OrderStatus { get; set; }
+    public OrderStatus? OrderStatus { get; set; }
 
     public string? ResponseMessage { get; set; }
 
