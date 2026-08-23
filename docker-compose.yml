@@ -3,11 +3,37 @@ x-mongo-app-env: &mongo-app-env
   # Overrides application-docker.properties' credential-free default via
   # Spring's relaxed env-var binding - see issue #33.
   SPRING_MONGODB_URI: mongodb://${MONGO_APP_USERNAME:-reactive-systems-app}:${MONGO_APP_PASSWORD:-reactive-systems-dev-app}@mongo-db:27017/reactive-systems?replicaSet=rs0&authSource=admin
+# Dev-only default HTTP Basic credential for the REST APIs, shared by the
+# Java services and the api-gateway (which injects it on proxied requests).
+# Overridable via a .env file, same as the Mongo credentials. Matches the
+# defaults order-service-cs declares with its own ApiAuth__* binding.
+x-api-auth-env: &api-auth-env
+  SPRING_SECURITY_USER_NAME: ${API_AUTH_USERNAME:-admin}
+  SPRING_SECURITY_USER_PASSWORD: ${API_AUTH_PASSWORD:-reactive-systems-dev-api}
 services:
   frontend:
     build: ./frontend
     ports:
       - "80:80"
+  api-gateway:
+    build: ./api-gateway
+    # The only published API entry point - the backends' ports are
+    # deliberately not mapped to the host, so all API traffic (browser via
+    # the frontend's /api/ proxy, or curl against localhost:8080) flows
+    # through the gateway. No depends_on: the gateway resolves upstreams
+    # lazily per-request, so it boots fine before (or without) them.
+    ports:
+      - "8080:8080"
+    environment:
+      RESOLVER: 127.0.0.11
+      # Which order-service variant to route to. Override alongside the
+      # matching compose profile, e.g.:
+      #   ORDER_UPSTREAM=order-service-vt:8083 docker compose --profile order-service-vt up
+      #   ORDER_UPSTREAM=order-service-cs:8080 docker compose --profile order-service-cs up
+      ORDER_UPSTREAM: ${ORDER_UPSTREAM:-order-service:8080}
+      INVENTORY_UPSTREAM: inventory-service:8081
+      API_AUTH_USERNAME: ${API_AUTH_USERNAME:-admin}
+      API_AUTH_PASSWORD: ${API_AUTH_PASSWORD:-reactive-systems-dev-api}
   zookeeper:
     image: confluentinc/cp-zookeeper:latest
     environment:
@@ -122,9 +148,7 @@ services:
     profiles: ["order-service"]
     build: ./order-service
     environment:
-      <<: *mongo-app-env
-    ports:
-      - "8080:8080"
+      <<: [*mongo-app-env, *api-auth-env]
     depends_on:
       mongodb:
         condition: service_healthy
@@ -134,9 +158,7 @@ services:
     profiles: ["order-service-vt"]
     build: ./order-service-vt
     environment:
-      <<: *mongo-app-env
-    ports:
-      - "8080:8083"
+      <<: [*mongo-app-env, *api-auth-env]
     depends_on:
       mongodb:
         condition: service_healthy
@@ -174,8 +196,6 @@ services:
       # two aren't both set, so they're required, not merely convenient.
       ApiAuth__Username: ${API_AUTH_USERNAME:-admin}
       ApiAuth__Password: ${API_AUTH_PASSWORD:-reactive-systems-dev-api}
-    ports:
-      - "8080:8080"
     depends_on:
       mongodb:
         condition: service_healthy
@@ -184,9 +204,7 @@ services:
   inventory-service:
     build: ./inventory-service
     environment:
-      <<: *mongo-app-env
-    ports:
-      - "8081:8081"
+      <<: [*mongo-app-env, *api-auth-env]
     depends_on:
       mongodb:
         condition: service_healthy
@@ -196,8 +214,6 @@ services:
     build: ./shipping-service
     environment:
       <<: *mongo-app-env
-    ports:
-      - "8082:8082"
     depends_on:
       mongodb:
         condition: service_healthy

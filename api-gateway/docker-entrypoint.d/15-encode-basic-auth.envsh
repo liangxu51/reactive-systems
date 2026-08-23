@@ -1,0 +1,16 @@
+#!/bin/sh
+# Derives API_AUTH_B64 (the value the gateway injects as
+# "Authorization: Basic ...") from API_AUTH_USERNAME/API_AUTH_PASSWORD.
+# envsubst can only substitute, not compute, so this must run before the
+# stock 20-envsubst-on-templates.sh renders templates/default.conf.template.
+# It is a *.envsh file because the stock entrypoint sources those (making the
+# export visible to the envsubst step) but launches *.sh files as
+# subprocesses, whose exports would be lost.
+# Fail fast if either half is missing - a gateway silently injecting
+# "Basic Og==" (empty user:pass) would just turn every request into a 401.
+
+: "${API_AUTH_USERNAME:?API_AUTH_USERNAME must be set}"
+: "${API_AUTH_PASSWORD:?API_AUTH_PASSWORD must be set}"
+
+API_AUTH_B64=$(printf '%s:%s' "$API_AUTH_USERNAME" "$API_AUTH_PASSWORD" | base64 | tr -d '\n')
+export API_AUTH_B64

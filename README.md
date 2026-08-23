@@ -2,7 +2,9 @@
 
 This module contains services for article about reactive systems in Java. Please note that these services comprise parts of a full stack application to demonstrate the capabilities of a reactive system. Unless there is an article which extends on this concept, this is probably not a suitable module to add other code.
 
-> ⚠️ **Demo only — not for production.** These services have no authentication or authorization; `GET /api/orders` exposes all order data (including customer PII) to any caller. Add auth and scope data access before any real deployment.
+> ⚠️ **Demo only — not for production.** The backends require HTTP Basic auth and the nginx `api-gateway` injects that credential at the edge, but the edge itself is open — anyone who can reach the gateway (or frontend) can use the API, and `GET /api/orders` returns all order data (including customer PII). Add real edge authentication and scope data access before any real deployment.
+
+Under docker-compose, the gateway on `localhost:8080` is the only published API entry point (backend ports are not mapped to the host); the frontend on `localhost:80` proxies `/api/` to it. See `docs/superpowers/specs/2026-08-22-api-gateway-design.md`.
 
 ## Local development
 
