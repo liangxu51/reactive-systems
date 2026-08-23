@@ -1,14 +1,18 @@
 {{- if .Values.orderService.enabled }}
+{{- if or .Values.orderServiceVt.enabled .Values.orderServiceCs.enabled }}
+{{- fail "orderService, orderServiceVt, and orderServiceCs are mutually-exclusive alternatives (all three bind the same order-service Kafka topic/Mongo collection) - enable only one." }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: order-service
   labels:
     app: order-service
-    # order-service/order-service-vt are mutually exclusive and share this
-    # same Service name (see order-service-vt.yaml) - this shared label lets
-    # a single ServiceMonitor (see monitoring-servicemonitors.yaml) cover
-    # whichever one is actually enabled.
+    # order-service/order-service-vt/order-service-cs are mutually exclusive
+    # and share this same Service name (see order-service-vt.yaml/
+    # order-service-cs.yaml) - this shared label lets a single ServiceMonitor
+    # (see monitoring-servicemonitors.yaml) cover whichever one is actually
+    # enabled.
     monitoring: order-service
     {{- include "reactive-systems.labels" . | nindent 4 }}
 spec:

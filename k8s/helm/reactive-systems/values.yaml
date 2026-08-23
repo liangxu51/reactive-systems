@@ -168,9 +168,36 @@ appResources:
     limits:
       cpu: 200m
       memory: 128Mi
+  # order-service-cs (ASP.NET Core, self-contained deploy) - no JVM heap/
+  # metaspace/JIT code cache overhead to carry, so idle memory sits well
+  # below the jvm/jvmLight tiers above. CPU limit left level with jvm's
+  # since request handling under load still needs equivalent headroom - only
+  # the baseline/idle figures (requests, memory limit) are lowered. Same
+  # "starting point, tune under real traffic" caveat as the other tiers -
+  # not a load-tested SLA figure.
+  #
+  # 256Mi (the original limit here) is untested under real load: .NET's
+  # container-aware GC sizes its heap ceiling off this limit, and librdkafka
+  # (native, off-heap) + the Mongo driver's connection pool + OpenTelemetry's
+  # batch span processor are all resident in the same container alongside
+  # it. Raised to 384Mi/96Mi, matching jvmLight's more conservative headroom
+  # style (requests ~1/4 of the limit) now that this is the chart's default
+  # enabled variant, rather than shipping an untested figure as the default.
+  dotnet:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      cpu: 500m
+      memory: 384Mi
 
+# Java/Spring WebFlux reactive baseline. Mutually exclusive with
+# orderServiceVt/orderServiceCs (see the `fail` guards in each of their
+# templates) - disabled by default now that orderServiceCs below is the
+# default enabled variant. Switch back with:
+#   --set orderServiceCs.enabled=false --set orderService.enabled=true
 orderService:
-  enabled: true
+  enabled: false
   image:
     repository: order-service
     tag: ""
@@ -179,15 +206,30 @@ orderService:
   replicaCount: 1
 
 # Virtual-thread variant of order-service (see order-service-vt module).
-# Mutually exclusive with orderService: both would consume/produce on the
-# same Kafka topic and Mongo collection, mirroring the docker-compose
-# profiles "order-service" / "order-service-vt".
+# Mutually exclusive with orderService/orderServiceCs: all three would
+# consume/produce on the same Kafka topic and Mongo collection, mirroring
+# the docker-compose profiles "order-service" / "order-service-vt".
 orderServiceVt:
   enabled: false
   image:
     repository: order-service-vt
     tag: ""
   containerPort: 8083
+  servicePort: 8080
+  replicaCount: 1
+
+# C#/.NET (ASP.NET Core) variant of order-service (see order-service-cs
+# module) - the default enabled variant. Mutually exclusive with
+# orderService/orderServiceVt: all three would consume/produce on the same
+# Kafka topic and Mongo collection. Switch to one of the Java variants with
+# e.g. --set orderServiceCs.enabled=false --set orderService.enabled=true -
+# no template edits needed.
+orderServiceCs:
+  enabled: true
+  image:
+    repository: order-service-cs
+    tag: ""
+  containerPort: 8080
   servicePort: 8080
   replicaCount: 1
 

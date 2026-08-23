@@ -1,0 +1,93 @@
+{{- if .Values.orderServiceCs.enabled }}
+{{- if or .Values.orderService.enabled .Values.orderServiceVt.enabled }}
+{{- fail "orderService, orderServiceVt, and orderServiceCs are mutually-exclusive alternatives (all three bind the same order-service Kafka topic/Mongo collection) - enable only one." }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service-cs
+  labels:
+    app: order-service-cs
+    # Shared with order-service.yaml/order-service-vt.yaml's Deployments/
+    # Service - see order-service.yaml's comment for why (mutually
+    # exclusive, same Service name, one ServiceMonitor covers whichever is
+    # enabled).
+    monitoring: order-service
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.orderServiceCs.replicaCount }}
+  selector:
+    matchLabels:
+      app: order-service-cs
+  template:
+    metadata:
+      labels:
+        app: order-service-cs
+    spec:
+      {{- include "reactive-systems.imagePullSecrets" . | nindent 6 }}
+      initContainers:
+        - name: wait-for-mongo-kafka
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z {{ .Values.mongodb.serviceName }} {{ .Values.mongodb.port }} && nc -z {{ .Values.kafka.serviceName }} {{ .Values.kafka.port }}; do
+                echo waiting for mongo-db and kafka-broker; sleep 2;
+              done
+      containers:
+        - name: order-service-cs
+          image: "{{ .Values.orderServiceCs.image.repository }}:{{ .Values.orderServiceCs.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          env:
+            # Selects appsettings.Docker.json (Mongo/Kafka/Jaeger
+            # docker-network hostnames) over the plain appsettings.json
+            # localhost defaults - see order-service-cs/Program.cs.
+            - name: ASPNETCORE_ENVIRONMENT
+              value: Docker
+            {{- include "reactive-systems.mongoUriEnvDotnet" . | nindent 12 }}
+            {{- include "reactive-systems.apiAuthEnvDotnet" . | nindent 12 }}
+            # Not secrets, so no Secret-backed helper needed (unlike Mongo/
+            # ApiAuth above) - set directly from the same values.yaml
+            # sources the Java services' hardcoded application-docker.
+            # properties hostnames already match (templates/jaeger.yaml's
+            # "jaeger" Service, values.yaml's kafka.serviceName/kafka.port).
+            # Base URL only, no path - order-service-cs/Program.cs appends
+            # /v1/traces itself.
+            - name: Jaeger__OtlpEndpoint
+              value: "http://jaeger:{{ .Values.jaeger.otlpHttpPort }}"
+            - name: Kafka__BootstrapServers
+              value: "{{ .Values.kafka.serviceName }}:{{ .Values.kafka.port }}"
+          ports:
+            - name: http
+              containerPort: {{ .Values.orderServiceCs.containerPort }}
+          resources:
+            {{- toYaml .Values.appResources.dotnet | nindent 12 }}
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.orderServiceCs.containerPort }}
+            initialDelaySeconds: 15
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.orderServiceCs.containerPort }}
+            initialDelaySeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  # Named "order-service" (not "order-service-cs") so it's a drop-in
+  # replacement for the order-service Service that the frontend and
+  # port-forward instructions target.
+  name: order-service
+  labels:
+    app: order-service-cs
+    monitoring: order-service
+    {{- include "reactive-systems.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: order-service-cs
+  ports:
+    - name: http
+      port: {{ .Values.orderServiceCs.servicePort }}
+      targetPort: {{ .Values.orderServiceCs.containerPort }}
+{{- end }}

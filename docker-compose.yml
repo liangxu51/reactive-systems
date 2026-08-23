@@ -142,6 +142,45 @@ services:
         condition: service_healthy
       mongo-init-replicaset:
         condition: service_completed_successfully
+  order-service-cs:
+    profiles: ["order-service-cs"]
+    build: ./order-service-cs
+    environment:
+      # Not *mongo-app-env here - that anchor's only key is
+      # SPRING_MONGODB_URI, which this .NET service never reads (it binds
+      # config via ASP.NET Core's Section__Key convention instead of
+      # Spring's relaxed binding), so merging it in would just be dead
+      # configuration. Mongo__ConnectionString below carries the identical
+      # connection string/credential-substitution pattern instead.
+      #
+      # Selects appsettings.Docker.json (Mongo/Kafka/Jaeger docker-network
+      # hostnames) over the plain appsettings.json localhost defaults - see
+      # order-service-cs/Program.cs. The Dockerfile does not bake this in,
+      # unlike the Java services' Spring profile handling, so it must be set
+      # here (matches the Helm chart's order-service-cs.yaml).
+      ASPNETCORE_ENVIRONMENT: Docker
+      Mongo__ConnectionString: mongodb://${MONGO_APP_USERNAME:-reactive-systems-app}:${MONGO_APP_PASSWORD:-reactive-systems-dev-app}@mongo-db:27017/reactive-systems?replicaSet=rs0&authSource=admin
+      # Kafka__BootstrapServers and Jaeger__OtlpEndpoint are deliberately
+      # not set here - appsettings.Docker.json already defaults both to the
+      # correct docker-compose hostnames (kafka-broker:9092, no Jaeger
+      # container in this file so http://jaeger:4318 just fails silently/
+      # retries, same as the Java services with no Jaeger here either).
+      #
+      # Dev-only default HTTP Basic credentials, overridable via a .env
+      # file the same way the Mongo credentials above are. Unlike the Java
+      # services (which fall back to Spring Boot's auto-generated random
+      # password if SPRING_SECURITY_USER_NAME/PASSWORD aren't set), this
+      # service's auth handler fails closed - every request 401s - if these
+      # two aren't both set, so they're required, not merely convenient.
+      ApiAuth__Username: ${API_AUTH_USERNAME:-admin}
+      ApiAuth__Password: ${API_AUTH_PASSWORD:-reactive-systems-dev-api}
+    ports:
+      - "8080:8080"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      mongo-init-replicaset:
+        condition: service_completed_successfully
   inventory-service:
     build: ./inventory-service
     environment:

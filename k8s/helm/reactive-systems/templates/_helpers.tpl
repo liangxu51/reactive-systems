@@ -54,3 +54,40 @@ templates/api-secret.yaml for how the password is generated and persisted.
       name: api-credentials
       key: password
 {{- end -}}
+
+{{/*
+.NET-flavored equivalent of reactive-systems.mongoUriEnv above, for
+order-service-cs - same mongo-credentials Secret/app user/replica set, just
+env var names matching .NET's config binder convention (double-underscore
+section separator) instead of Spring's relaxed binding, and a connection
+string the MongoDB C# driver's MongoUrl.Create can parse the database name
+out of directly (see order-service-cs/Program.cs). Still needs
+replicaSet=rs0&authSource=admin to actually reach the 3-member replica set
+and authenticate as the admin-db-scoped app user, same as the Spring variant.
+*/}}
+{{- define "reactive-systems.mongoUriEnvDotnet" -}}
+- name: MONGO_APP_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: mongo-credentials
+      key: app-password
+- name: Mongo__ConnectionString
+  value: "mongodb://{{ .Values.mongodb.auth.appUsername }}:$(MONGO_APP_PASSWORD)@{{ .Values.mongodb.serviceName }}:{{ .Values.mongodb.port }}/reactive-systems?replicaSet=rs0&authSource=admin"
+{{- end -}}
+
+{{/*
+.NET-flavored equivalent of reactive-systems.apiAuthEnv above, for
+order-service-cs - same shared api-credentials Secret/identity, just env var
+names matching .NET's config binder convention (ApiAuth:Username/
+ApiAuth:Password -> ApiAuth__Username/ApiAuth__Password) instead of Spring's
+SPRING_SECURITY_USER_*.
+*/}}
+{{- define "reactive-systems.apiAuthEnvDotnet" -}}
+- name: ApiAuth__Username
+  value: {{ .Values.api.auth.username | quote }}
+- name: ApiAuth__Password
+  valueFrom:
+    secretKeyRef:
+      name: api-credentials
+      key: password
+{{- end -}}

@@ -6,6 +6,26 @@
 # into this same dashboard rather than a second one, since both metrics and
 # logs share this one Grafana.
 #
+# Panels 1/2 ("Order pipeline request rate"/"p99 latency") match on EITHER
+# of two HTTP metric families, not just one: order-service (Java) and
+# order-service-vt emit Micrometer's `http_server_requests_seconds_*` with
+# `uri`/`status` labels, but order-service-cs (prometheus-net's built-in
+# UseHttpMetrics()) emits `http_request_duration_seconds_*` with a `code`
+# label instead of `status`, and no `uri` label equivalent at all (renaming
+# prometheus-net's default 'code'/'method'/'controller'/'action' label set
+# requires fully custom ASP.NET Core middleware, not just an options tweak -
+# confirmed against prometheus-net.AspNetCore 8.2.1's HttpRequestLabelNames).
+# Since all three order-service variants share one Service/ServiceMonitor
+# (`monitoring: order-service`, see order-service-cs.yaml) and are mutually
+# exclusive, only one of these two metric families is ever actually present
+# at a time - `label_replace(...) or label_replace(...)` normalizes the C#
+# variant's `code` label to `status` and lets whichever family has data
+# populate the panel, so these panels work for whichever variant is
+# currently enabled instead of only the Java ones. The `uri` grouping label
+# simply comes back empty ("") for order-service-cs rows, which PromQL's
+# `by (...)` treats as a normal (if less granular) label value rather than
+# an error.
+#
 # The Jaeger panel (id 9) is deliberately "table", not "traces": confirmed
 # live via an actual headless-browser render (not just checking the API
 # response) that Grafana's core "traces" panel type expects a single
@@ -42,7 +62,7 @@ data:
           "datasource": null,
           "targets": [
             {
-              "expr": "sum(rate(http_server_requests_seconds_count{job=~\"order-service|inventory-service\"}[5m])) by (job, uri, status)",
+              "expr": "sum(label_replace(rate(http_server_requests_seconds_count{job=~\"order-service|inventory-service\"}[5m]), \"status\", \"$1\", \"status\", \"(.*)\") or label_replace(rate(http_request_duration_seconds_count{job=~\"order-service|inventory-service\"}[5m]), \"status\", \"$1\", \"code\", \"(.*)\")) by (job, uri, status)",
               "legendFormat": "{{`{{job}}`}} {{`{{uri}}`}} {{`{{status}}`}}"
             }
           ]
@@ -55,7 +75,7 @@ data:
           "datasource": null,
           "targets": [
             {
-              "expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{job=~\"order-service|inventory-service\"}[5m])) by (le, job, uri))",
+              "expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{job=~\"order-service|inventory-service\"}[5m]) or rate(http_request_duration_seconds_bucket{job=~\"order-service|inventory-service\"}[5m])) by (le, job, uri))",
               "legendFormat": "{{`{{job}}`}} {{`{{uri}}`}}"
             }
           ]
