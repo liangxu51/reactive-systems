@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>OrderService.Api</RootNamespace>
+    <AssemblyName>OrderService.Api</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MongoDB.Driver" Version="3.11.0" />
+  </ItemGroup>
+
+  <!-- The default SDK globs pick up every *.cs file under this directory,
+       including the test project's - exclude it so the two projects don't
+       double-compile each other's sources. -->
+  <ItemGroup>
+    <Compile Remove="order-service-cs.Tests/**/*.cs" />
+    <Content Remove="order-service-cs.Tests/**/*" />
+    <None Remove="order-service-cs.Tests/**/*" />
+  </ItemGroup>
+
+</Project>
