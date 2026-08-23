@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using Confluent.Kafka;
 using Microsoft.Extensions.Logging;
@@ -125,5 +127,56 @@ public class OrderProducerTests
 
         Assert.Equal(Acks.All, config.Acks);
         Assert.Equal("kafka:9092", config.BootstrapServers);
+    }
+
+    [Fact]
+    public void PublishRaw_WithAmbientActivity_InjectsW3CTraceparentHeader()
+    {
+        // Without this header, OrderConsumer's "kafka.consume" span has
+        // nothing to parent to, and each saga hop shows up in Jaeger as its
+        // own disconnected root trace instead of one linked trace per order.
+        var producerMock = new Mock<IProducer<string, string>>();
+        Message<string, string>? captured = null;
+        producerMock
+            .Setup(p => p.Produce(
+                It.IsAny<string>(),
+                It.IsAny<Message<string, string>>(),
+                It.IsAny<Action<DeliveryReport<string, string>>>()))
+            .Callback<string, Message<string, string>, Action<DeliveryReport<string, string>>>(
+                (_, message, _) => captured = message);
+
+        using var activity = new Activity("test-ambient-span").Start();
+
+        var producer = new OrderProducer(producerMock.Object, Mock.Of<ILogger<OrderProducer>>());
+        producer.PublishRaw("orders", "507f1f77bcf86cd799439011", "{}");
+
+        activity.Stop();
+
+        Assert.NotNull(captured);
+        Assert.NotNull(captured!.Headers);
+        Assert.True(captured.Headers!.TryGetLastBytes("traceparent", out var headerBytes));
+        Assert.Equal(activity.Id, Encoding.UTF8.GetString(headerBytes));
+    }
+
+    [Fact]
+    public void PublishRaw_NoAmbientActivity_DoesNotAddTraceparentHeader()
+    {
+        Assert.Null(Activity.Current);
+
+        var producerMock = new Mock<IProducer<string, string>>();
+        Message<string, string>? captured = null;
+        producerMock
+            .Setup(p => p.Produce(
+                It.IsAny<string>(),
+                It.IsAny<Message<string, string>>(),
+                It.IsAny<Action<DeliveryReport<string, string>>>()))
+            .Callback<string, Message<string, string>, Action<DeliveryReport<string, string>>>(
+                (_, message, _) => captured = message);
+
+        var producer = new OrderProducer(producerMock.Object, Mock.Of<ILogger<OrderProducer>>());
+        producer.PublishRaw("orders", "507f1f77bcf86cd799439011", "{}");
+
+        Assert.NotNull(captured);
+        Assert.False(captured!.Headers?.TryGetLastBytes("traceparent", out _) ?? false);
     }
 }

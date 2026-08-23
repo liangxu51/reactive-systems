@@ -30,6 +30,32 @@ public class EcsCompatJsonFormatterTests
             properties ?? Array.Empty<LogEventProperty>());
     }
 
+    [Theory]
+    [InlineData(LogEventLevel.Verbose, "TRACE")]
+    [InlineData(LogEventLevel.Debug, "DEBUG")]
+    [InlineData(LogEventLevel.Information, "INFO")]
+    [InlineData(LogEventLevel.Warning, "WARN")]
+    [InlineData(LogEventLevel.Error, "ERROR")]
+    [InlineData(LogEventLevel.Fatal, "FATAL")]
+    public void Format_MapsLevelToUppercaseEcsValue_NotSerilogsOwnCasing(LogEventLevel level, string expectedEcsLevel)
+    {
+        // The Grafana "ERROR log rate by service" dashboard panel
+        // (k8s/helm/reactive-systems/templates/grafana-dashboards.yaml)
+        // queries Loki with an exact-match level="ERROR" selector - Serilog's
+        // own LogEventLevel.ToString() casing/names ("Error", not "ERROR")
+        // would silently never match that query. Pinning down every level's
+        // exact mapping here, not just Error, since the same silent-mismatch
+        // risk applies to any future panel querying on another level.
+        var formatter = new EcsCompatJsonFormatter("order-service-cs");
+        var logEvent = CreateLogEvent(level, "level mapping check");
+
+        using var writer = new StringWriter();
+        formatter.Format(logEvent, writer);
+
+        using var doc = JsonDocument.Parse(writer.ToString());
+        Assert.Equal(expectedEcsLevel, doc.RootElement.GetProperty("log.level").GetString());
+    }
+
     [Fact]
     public void Format_EmitsFlatTopLevelDottedKeys_ForLevelAndServiceName()
     {
@@ -43,7 +69,7 @@ public class EcsCompatJsonFormatterTests
         var root = doc.RootElement;
 
         Assert.True(root.TryGetProperty("log.level", out var logLevel));
-        Assert.Equal("Information", logLevel.GetString());
+        Assert.Equal("INFO", logLevel.GetString());
 
         Assert.True(root.TryGetProperty("service.name", out var serviceName));
         Assert.Equal("order-service-cs", serviceName.GetString());

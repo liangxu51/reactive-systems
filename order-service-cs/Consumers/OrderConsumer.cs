@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using Confluent.Kafka;
 using Microsoft.Extensions.Hosting;
@@ -147,11 +148,12 @@ public sealed class OrderConsumer : BackgroundService
         // One span per consumed message (covering every retry attempt and,
         // on exhaustion, the DLT forward) - matches order-service (Java)'s
         // spring.kafka.listener.observation-enabled=true giving every
-        // @KafkaListener invocation its own span.
-        using var activity = Telemetry.ActivitySource.StartActivity("kafka.consume", ActivityKind.Consumer);
-        activity?.SetTag("messaging.system", "kafka");
-        activity?.SetTag("messaging.destination.name", Topic);
-        activity?.SetTag("messaging.kafka.message.key", result.Message.Key);
+        // @KafkaListener invocation its own span. Parented to the producer's
+        // span via the inbound record's "traceparent" header (see
+        // StartConsumeActivity/TryExtractParentContext below) so the saga
+        // renders as one linked trace per order in Jaeger, not a disconnected
+        // root span per hop.
+        using var activity = StartConsumeActivity(result);
 
         for (var attempt = 1; attempt <= MaxAttempts; attempt++)
         {
@@ -184,5 +186,49 @@ public sealed class OrderConsumer : BackgroundService
                 _orderProducer.PublishRaw(DeadLetterTopic, result.Message.Key, result.Message.Value);
             }
         }
+    }
+
+    /// <summary>
+    /// Starts the per-message "kafka.consume" Activity, parented to the
+    /// producer's span when the inbound record carries a "traceparent"
+    /// header (see <see cref="TryExtractParentContext"/>), falling back to
+    /// an unparented root span otherwise (e.g. a message produced before
+    /// this propagation existed, or by something other than
+    /// OrderProducer.PublishRaw).
+    /// </summary>
+    private static Activity? StartConsumeActivity(ConsumeResult<string, string> result)
+    {
+        var activity = TryExtractParentContext(result.Message.Headers, out var parentContext)
+            ? Telemetry.ActivitySource.StartActivity("kafka.consume", ActivityKind.Consumer, parentContext)
+            : Telemetry.ActivitySource.StartActivity("kafka.consume", ActivityKind.Consumer);
+
+        activity?.SetTag("messaging.system", "kafka");
+        activity?.SetTag("messaging.destination.name", Topic);
+        activity?.SetTag("messaging.kafka.message.key", result.Message.Key);
+
+        return activity;
+    }
+
+    /// <summary>
+    /// Extracts and parses a W3C "traceparent" header from an inbound Kafka
+    /// record's headers - the header OrderProducer.PublishRaw injects on the
+    /// sending side (see Producers/OrderProducer.cs). This is the piece that
+    /// actually links the saga's hops into one trace in Jaeger: without a
+    /// parent ActivityContext, each "kafka.consume"/"kafka.produce" span
+    /// would start its own disconnected root trace instead of continuing the
+    /// one the originating HTTP request started. Public (not private) so it
+    /// can be unit tested directly without a real IConsumer/ConsumeResult.
+    /// </summary>
+    public static bool TryExtractParentContext(Headers? headers, out ActivityContext parentContext)
+    {
+        parentContext = default;
+
+        if (headers is null || !headers.TryGetLastBytes("traceparent", out var traceparentBytes))
+        {
+            return false;
+        }
+
+        var traceparent = Encoding.UTF8.GetString(traceparentBytes);
+        return ActivityContext.TryParse(traceparent, traceState: null, out parentContext);
     }
 }

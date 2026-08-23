@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using Confluent.Kafka;
 using Microsoft.Extensions.Logging;
@@ -121,6 +122,25 @@ public sealed class OrderProducer : IOrderProducer, IDisposable
         activity?.SetTag("messaging.kafka.message.key", key);
 
         var message = new Message<string, string> { Key = key, Value = value! };
+
+        // Propagate the current trace context across the Kafka hop as a W3C
+        // "traceparent" header - matches order-service (Java)'s
+        // spring.kafka.template.observation-enabled=true, which injects
+        // traceparent into the record's headers automatically. Without this,
+        // OrderConsumer's "kafka.consume" span (see Consumers/OrderConsumer.cs)
+        // has no parent to attach to, and each saga hop shows up in Jaeger as
+        // its own disconnected root trace instead of one linked trace per
+        // order. Activity.Current, not just `activity` above, since
+        // StartActivity returns null (no span created) when nothing is
+        // listening on Telemetry.ActivitySource - in that case the ambient
+        // parent (e.g. the inbound HTTP request's own Activity) should still
+        // propagate rather than silently dropping the header.
+        var traceparent = Activity.Current?.Id;
+        if (traceparent is not null)
+        {
+            message.Headers = new Headers { { "traceparent", Encoding.UTF8.GetBytes(traceparent) } };
+        }
+
         _producer.Produce(topic, message, report =>
         {
             if (report.Error.IsError)

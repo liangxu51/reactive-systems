@@ -58,7 +58,7 @@ public sealed class EcsCompatJsonFormatter : ITextFormatter
         var fields = new Dictionary<string, object?>
         {
             ["@timestamp"] = logEvent.Timestamp.UtcDateTime.ToString("O"),
-            ["log.level"] = logEvent.Level.ToString(),
+            ["log.level"] = ToEcsLevel(logEvent.Level),
             ["service.name"] = _serviceName,
             ["message"] = logEvent.RenderMessage(),
         };
@@ -95,5 +95,31 @@ public sealed class EcsCompatJsonFormatter : ITextFormatter
     {
         ScalarValue scalar => scalar.Value,
         _ => value.ToString(),
+    };
+
+    /// <summary>
+    /// Maps Serilog's <see cref="LogEventLevel"/> to the uppercase ECS-style
+    /// level name order-service (Java)'s
+    /// <c>logging.structured.format.console=ecs</c> emits (<c>TRACE</c>,
+    /// <c>DEBUG</c>, <c>INFO</c>, <c>WARN</c>, <c>ERROR</c>, <c>FATAL</c>) -
+    /// **not** <c>logEvent.Level.ToString()</c>'s own casing/names
+    /// (<c>Verbose</c>, <c>Debug</c>, <c>Information</c>, <c>Warning</c>,
+    /// <c>Error</c>, <c>Fatal</c>). This match matters beyond cosmetics: the
+    /// Grafana "ERROR log rate by service" dashboard panel
+    /// (k8s/helm/reactive-systems/templates/grafana-dashboards.yaml) queries
+    /// Loki with an exact-match <c>level="ERROR"</c> selector on the label
+    /// Promtail promotes from this field - emitting Serilog's own
+    /// <c>"Error"</c> here would silently never match that query (no error,
+    /// just a permanently-empty panel for this service).
+    /// </summary>
+    private static string ToEcsLevel(LogEventLevel level) => level switch
+    {
+        LogEventLevel.Verbose => "TRACE",
+        LogEventLevel.Debug => "DEBUG",
+        LogEventLevel.Information => "INFO",
+        LogEventLevel.Warning => "WARN",
+        LogEventLevel.Error => "ERROR",
+        LogEventLevel.Fatal => "FATAL",
+        _ => level.ToString().ToUpperInvariant(),
     };
 }
