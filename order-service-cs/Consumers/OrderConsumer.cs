@@ -1,8 +1,10 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Confluent.Kafka;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OrderService.Api.Domain;
+using OrderService.Api.Observability;
 using OrderService.Api.Producers;
 using OrderService.Api.Repositories;
 using OrderService.Api.Serialization;
@@ -142,6 +144,15 @@ public sealed class OrderConsumer : BackgroundService
     /// </summary>
     private void ProcessWithRetry(ConsumeResult<string, string> result, CancellationToken stoppingToken)
     {
+        // One span per consumed message (covering every retry attempt and,
+        // on exhaustion, the DLT forward) - matches order-service (Java)'s
+        // spring.kafka.listener.observation-enabled=true giving every
+        // @KafkaListener invocation its own span.
+        using var activity = Telemetry.ActivitySource.StartActivity("kafka.consume", ActivityKind.Consumer);
+        activity?.SetTag("messaging.system", "kafka");
+        activity?.SetTag("messaging.destination.name", Topic);
+        activity?.SetTag("messaging.kafka.message.key", result.Message.Key);
+
         for (var attempt = 1; attempt <= MaxAttempts; attempt++)
         {
             try

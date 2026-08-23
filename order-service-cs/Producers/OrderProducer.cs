@@ -1,7 +1,9 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Confluent.Kafka;
 using Microsoft.Extensions.Logging;
 using OrderService.Api.Domain;
+using OrderService.Api.Observability;
 using OrderService.Api.Serialization;
 
 namespace OrderService.Api.Producers;
@@ -108,6 +110,16 @@ public sealed class OrderProducer : IOrderProducer, IDisposable
 
     public void PublishRaw(string topic, string key, string? value)
     {
+        // Single choke point for every Kafka send (SendMessage's normal
+        // publish and OrderConsumer's DLT forward both funnel through here),
+        // so one Activity here covers both - matches order-service (Java)'s
+        // spring.kafka.template.observation-enabled=true giving every
+        // KafkaTemplate.send(...) its own span.
+        using var activity = Telemetry.ActivitySource.StartActivity("kafka.produce", ActivityKind.Producer);
+        activity?.SetTag("messaging.system", "kafka");
+        activity?.SetTag("messaging.destination.name", topic);
+        activity?.SetTag("messaging.kafka.message.key", key);
+
         var message = new Message<string, string> { Key = key, Value = value! };
         _producer.Produce(topic, message, report =>
         {
