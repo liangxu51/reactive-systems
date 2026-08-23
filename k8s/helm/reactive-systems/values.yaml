@@ -8,6 +8,7 @@
 #   docker build -t inventory-service:$TAG inventory-service
 #   docker build -t shipping-service:$TAG shipping-service
 #   (cd frontend && npm ci && npm run build) && docker build -t frontend:$TAG frontend
+#   docker build -t api-gateway:$TAG api-gateway
 #
 # imagePullPolicy stays IfNotPresent (no registry backs these images, so
 # Always would just fail trying to pull them) - bump appVersion in Chart.yaml
@@ -239,6 +240,19 @@ inventoryService:
     tag: ""
   containerPort: 8081
   servicePort: 8081
+  replicaCount: 1
+
+# nginx API gateway (see api-gateway module) - the single API entry point.
+# The frontend proxies all /api/* traffic here; the gateway owns the
+# per-route map (baked into its image) and injects the shared HTTP Basic
+# API credential upstream. ClusterIP only: in-cluster consumers
+# (ServiceMonitors, CI smoke/k6 jobs) keep hitting services directly.
+apiGateway:
+  image:
+    repository: api-gateway
+    tag: ""
+  containerPort: 8080
+  servicePort: 8080
   replicaCount: 1
 
 shippingService:

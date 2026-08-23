@@ -1,9 +1,10 @@
 # Overrides the nginx.conf baked into the frontend image (frontend/nginx.conf)
-# so its /api/orders and /api/products proxy_pass calls resolve via the
-# cluster's DNS server instead of Docker's fixed 127.0.0.11 embedded DNS,
-# which only exists under docker-compose. Keep the proxy locations below in
-# sync with frontend/nginx.conf if either changes (see ASSESSMENT.md tech
-# debt #4).
+# so its /api/ proxy_pass resolves via the cluster's DNS server instead of
+# Docker's fixed 127.0.0.11 embedded DNS, which only exists under
+# docker-compose. All per-route knowledge lives in the api-gateway image
+# (api-gateway/templates/default.conf.template); this file and
+# frontend/nginx.conf are each just the stable catch-all below, so they only
+# need syncing if the proxy *behavior* changes, never for routes.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -39,22 +40,20 @@ data:
 
             resolver {{ .Values.frontend.dnsResolverIP }} valid=10s;
 
-            location /api/orders {
+            location /api/ {
                 # FQDN required: nginx's resolver directive queries kube-dns
                 # directly and does not apply the pod's /etc/resolv.conf
                 # search domains the way glibc/musl does, so a bare
-                # short name like "order-service" gets SERVFAIL.
-                set $order_service order-service.{{ .Release.Namespace }}.svc.cluster.local;
-                proxy_pass http://$order_service:{{ .Values.orderService.servicePort }}/api/orders;
+                # short name like "api-gateway" gets SERVFAIL.
+                set $api_gateway api-gateway.{{ .Release.Namespace }}.svc.cluster.local;
+                proxy_pass http://$api_gateway:{{ .Values.apiGateway.servicePort }}$request_uri;
                 proxy_http_version 1.1;
                 proxy_set_header Connection '';
+                # SSE settings applied to all /api/ traffic - negligible cost
+                # for the small non-streaming responses, and this location
+                # stays route-agnostic.
                 proxy_buffering off;
                 proxy_read_timeout 1h;
-            }
-
-            location /api/products {
-                set $inventory_service inventory-service.{{ .Release.Namespace }}.svc.cluster.local;
-                proxy_pass http://$inventory_service:{{ .Values.inventoryService.servicePort }}/api/products;
             }
         }
     }

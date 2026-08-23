@@ -10,10 +10,13 @@ This is a tutorial project for Baeldung demonstrating reactive systems in Java. 
 
 | Service | Port | Description |
 |---|---|---|
-| `order-service` | 8080 | REST API entry point; persists orders and orchestrates the workflow |
-| `inventory-service` | 8081 | Reserves or reverts product stock |
-| `shipping-service` | 8082 | Creates shipment records (only accepts orders between 10:00–18:00) |
-| `frontend` | 80 (Docker) / 4200 (dev) | React UI showing reactive vs. blocking order streaming |
+| `api-gateway` | 8080 (Docker) | nginx gateway — the only published API entry point; owns the `/api/*` routing table, injects the HTTP Basic credential upstream |
+| `order-service` | 8080 (internal) | REST API; persists orders and orchestrates the workflow |
+| `inventory-service` | 8081 (internal) | Reserves or reverts product stock |
+| `shipping-service` | 8082 (internal) | Creates shipment records (only accepts orders between 10:00–18:00); Kafka-only, no REST surface |
+| `frontend` | 80 (Docker) / 4200 (dev) | React UI showing reactive vs. blocking order streaming; proxies `/api/` to the gateway |
+
+Under docker-compose the backend service ports are **not** published to the host — all API traffic goes through the gateway on `localhost:8080` (which injects auth), or through the frontend on `localhost:80`. Backend swagger-ui/actuator are reachable via `docker compose exec`, not through the gateway (default-deny). When running a service directly on the host (`mvn spring-boot:run`), its port is local as usual.
 
 ## Build & Run Commands
 
@@ -32,13 +35,7 @@ mvn spring-boot:run -pl order-service
 
 ### Frontend (React + Vite, plain JavaScript)
 
-```bash
-cd frontend
-npm install
-npm run dev      # dev server at http://localhost:4200
-npm run build    # production build
-npm run preview  # serve the production build locally
-```
+Standard npm workflow in `frontend/` — see `frontend/package.json` scripts.
 
 ### Run everything with Docker Compose
 
@@ -46,7 +43,15 @@ npm run preview  # serve the production build locally
 docker-compose up --build
 ```
 
-This starts: Zookeeper, Kafka (port 29092), MongoDB (port 27017), all three Java services, and the nginx-served frontend.
+This starts: Zookeeper, Kafka (port 29092), MongoDB (port 27017), the backend services, the nginx `api-gateway`, and the nginx-served frontend.
+
+The order-service variant is selected by compose profile; the gateway follows it via `ORDER_UPSTREAM`:
+
+```bash
+docker compose --profile order-service up --build                                          # Java (default upstream)
+ORDER_UPSTREAM=order-service-vt:8083 docker compose --profile order-service-vt up --build  # virtual threads
+ORDER_UPSTREAM=order-service-cs:8080 docker compose --profile order-service-cs up --build  # C#/.NET
+```
 
 ## Infrastructure Dependencies
 

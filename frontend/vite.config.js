@@ -6,8 +6,11 @@ export default defineConfig({
   server: {
     port: 4200,
     proxy: {
-      '/api/orders': 'http://localhost:8080',
-      '/api/products': 'http://localhost:8081',
+      // The docker-compose api-gateway (localhost:8080) owns the per-route
+      // map and injects the HTTP Basic credential the backends require -
+      // pointing dev straight at a bare service would 401 in the browser.
+      // Run `docker compose up api-gateway ...` (or the full stack) first.
+      '/api': 'http://localhost:8080',
     },
   },
 });
