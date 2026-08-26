@@ -104,8 +104,7 @@ server {
     }
 
     # Default deny: only the /api/* locations above are exposed. Backend
-    # swagger-ui/actuator stay internal (docker compose exec / kubectl
-    # port-forward for those).
+    # swagger-ui/actuator stay internal (kubectl port-forward for those).
     location / {
         return 404;
     }

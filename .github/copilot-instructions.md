@@ -29,8 +29,8 @@ mvn clean package -pl order-service
 mvn clean package -pl inventory-service
 mvn clean package -pl shipping-service
 
-# Build and run order-service locally (MongoDB + Kafka must be running)
-mvn spring-boot:run -pl order-service -Dspring-boot.run.arguments=--spring.kafka.bootstrap-servers=localhost:29092
+# Run order-service locally with MongoDB + Kafka supplied by Testcontainers
+mvn spring-boot:test-run -pl order-service
 
 # Build with hot-reload enabled (auto-restart on file changes)
 mvn compile -pl order-service
@@ -45,10 +45,11 @@ npm run build    # Production build
 npm run preview  # Serve built assets locally
 ```
 
-**All services (Docker Compose):**
+**All services (local cluster via Skaffold):**
 ```bash
-docker-compose up --build
-# Starts: Zookeeper, Kafka (29092), MongoDB (27017), all three Java services, nginx frontend
+skaffold dev              # build + deploy the Helm chart, redeploy on save
+skaffold dev -p app-only  # skip the monitoring stack for a faster loop
+skaffold delete           # tear down
 ```
 
 ## Testing
@@ -130,18 +131,18 @@ kafkaTemplate.executeInTransaction(ops -> {
 ## Infrastructure Dependencies
 
 All three Java services require:
-- **MongoDB** at `mongodb://localhost:27017/reactive-systems` (same database, separate collections)
-- **Kafka** at `localhost:9092` (or `localhost:29092` when connecting from host to Docker container)
+- **MongoDB** (same database, separate collections)
+- **Kafka** (single topic named `orders`)
 
-Start before running services locally:
+Nothing needs starting by hand: each service's Testcontainers launcher
+supplies both, and the Helm chart deploys both in-cluster.
+
 ```bash
-docker-compose up mongodb mongo-init-replicaset zookeeper kafka
+mvn spring-boot:test-run -pl order-service   # Mongo + Kafka in containers
 ```
 
-**Note on Kafka bootstrap servers:** 
-- Inside Docker: `kafka:9092` (container-to-container)
-- From host machine: `localhost:29092` (published port)
-- Configured in `application.properties`; override with `-Dspring-boot.run.arguments=--spring.kafka.bootstrap-servers=localhost:29092`
+Only `mvn spring-boot:run` and a plain `mvn test` of the integration tests
+expect them to already exist at `localhost:27017` / `localhost:9092`.
 
 ## Important: Domain Duplication & OrderStatus Sync
 
@@ -178,35 +179,35 @@ Same applies to `Order`, `LineItem`, `Address`, and `ObjectIdSerializer`. These 
 1. Update `domain/Order.java` in **all three services**
 2. Update `OrderStatus.java` in **all three services** if needed
 3. Run `mvn clean package -pl order-service,inventory-service,shipping-service`
-4. Test end-to-end with Docker Compose
+4. Test end-to-end with `skaffold run` against a local cluster
 
 ### Debugging event flow
 1. Check MongoDB collections:
    ```bash
-   docker exec -it mongo-db mongosh
+   kubectl exec -it -n reactive-systems mongo-db-0 -- mongo
    use reactive-systems
-   db.orders.find()
+   db.order.find()
    ```
 2. Check Kafka topic (use `kafka-console-consumer.sh` inside container or `kcat` if installed)
 3. Review service logs: each service logs consumed/published events
 
 ### Testing a service in isolation
-1. Start infrastructure: `docker-compose up mongodb mongo-init-replicaset zookeeper kafka`
-2. Run service: `mvn spring-boot:run -pl order-service -Dspring-boot.run.arguments=--spring.kafka.bootstrap-servers=localhost:29092`
+1. Run service with its backing containers: `mvn spring-boot:test-run -pl order-service`
+2. Call it with the pinned dev credential: `curl -u dev:dev localhost:8080/api/orders`
 3. Run tests: `mvn test -pl order-service`
 4. Access Swagger UI to test endpoints manually
 
 ### Frontend development
 1. `cd frontend && npm install && npm run dev`
 2. Dev server at `http://localhost:4200`
-3. Changes auto-reload; ensure backend services running on ports 8080–8082
+3. Changes auto-reload; forward the gateway first: `kubectl port-forward -n reactive-systems svc/api-gateway 8080:8080`
 
 ## Verification Checklist Before Committing
 
 - [ ] Run `mvn clean package -pl order-service,inventory-service,shipping-service` to ensure all services build
 - [ ] If modified `Order`, `LineItem`, `Address`, `OrderStatus`, or `ObjectIdSerializer`, verify changes applied to **all three services**
 - [ ] Run `mvn test -pl order-service` (or affected service) to verify unit/integration tests pass
-- [ ] Test end-to-end with `docker-compose up --build` if changing event flow or domain model
+- [ ] Test end-to-end with `skaffold run` if changing event flow or domain model
 - [ ] Check Swagger UI manually to ensure new endpoints are documented
 - [ ] For frontend changes, verify `npm run build` succeeds and preview works
 
@@ -215,7 +216,7 @@ Same applies to `Order`, `LineItem`, `Address`, and `ObjectIdSerializer`. These 
 - **IDE**: VS Code, IntelliJ, or Eclipse; Lombok support required for Java services
 - **Spring Boot DevTools**: Auto-restart on file changes (no manual Maven recompile needed in most IDEs)
 - **Git**: Feature branches welcome; follow conventional commits when possible
-- **Docker**: Required for local development (Testcontainers, docker-compose)
+- **Docker**: Required for local development (Testcontainers, image builds)
 
 ## Copilot Cloud Agent Setup
 

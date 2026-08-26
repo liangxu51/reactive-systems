@@ -40,8 +40,7 @@ spec:
               value: {{ .Values.frontend.dnsResolverIP | quote }}
             # All order-service variants (Java/vt/C#) publish the same
             # Service name, so no override is needed when switching variants
-            # - unlike docker-compose, where ORDER_UPSTREAM must name the
-            # variant's container.
+            # - flipping the enabled flag in values.yaml is enough.
             - name: ORDER_UPSTREAM
               value: "order-service.{{ .Release.Namespace }}.svc.cluster.local:{{ $orderPort }}"
             - name: INVENTORY_UPSTREAM

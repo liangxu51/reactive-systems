@@ -12,7 +12,8 @@ import org.springframework.kafka.config.TopicBuilder;
 // room to scale consumers without over-partitioning a demo-scale topic.
 // Replication factor is left unset so it falls back to the broker's own
 // default.replication.factor, which already differs correctly between the
-// single-broker docker-compose setup and the 3-broker Helm cluster (#40).
+// single-broker Testcontainers broker used for local runs and the 3-broker
+// Helm cluster (#40).
 //
 // Spring's KafkaAdmin creates this topic if missing and raises its partition
 // count on startup if an existing topic already has fewer - safe to declare

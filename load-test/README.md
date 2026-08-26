@@ -4,9 +4,10 @@ A [k6](https://k6.io/) script (`k6/order-saga.js`) that drives `POST /api/orders
 under ramping concurrent load and lets the resulting saga - `order-service` ->
 Kafka `RESERVE_INVENTORY` -> `inventory-service` -> Kafka `PREPARE_SHIPPING` ->
 `shipping-service` - play out for real against a live minikube deployment
-(`k8s/helm/reactive-systems/`). Not for `docker-compose.yml` - the Job below
-targets in-cluster DNS (`order-service:8080`, the Prometheus Service), which
-only exists under the Helm chart.
+(`k8s/helm/reactive-systems/`). The Job below targets in-cluster DNS
+(`order-service:8080`, the Prometheus Service), so it only runs against the
+Helm deployment - not against a service started by its local Testcontainers
+launcher.
 
 Runs as a one-off `Job` inside the cluster (`k8s/job.yaml`) rather than from a
 laptop through `kubectl port-forward`, so the forwarded tunnel itself never
