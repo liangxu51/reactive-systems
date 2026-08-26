@@ -105,6 +105,14 @@
             <artifactId>testcontainers-mongodb</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Kafka for the dev launcher (TestVirtualThreadOrderApplication).
+             The existing integration test mocks the producer instead, so this
+             is not needed to run the test suite. -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-kafka</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
