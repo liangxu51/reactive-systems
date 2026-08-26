@@ -74,7 +74,7 @@ builder.Services.AddAuthorization(options =>
 // Jaeger:OtlpEndpoint is the *base* endpoint only (e.g. http://jaeger:4318,
 // no /v1/traces suffix) - this composition root appends the OTLP HTTP
 // traces path itself below, so Task 5/6 only ever need to supply the bare
-// host:port, matching CLAUDE.md's docker-compose Jaeger service address.
+// host:port, matching the Jaeger Service address the Helm chart deploys.
 var otlpBaseEndpoint = (builder.Configuration["Jaeger:OtlpEndpoint"] ?? "http://localhost:4318").TrimEnd('/');
 builder.Services.AddOpenTelemetry()
     // Feeds the exported spans' service.name resource attribute - without

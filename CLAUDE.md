@@ -10,13 +10,15 @@ This is a tutorial project for Baeldung demonstrating reactive systems in Java. 
 
 | Service | Port | Description |
 |---|---|---|
-| `api-gateway` | 8080 (Docker) | nginx gateway — the only published API entry point; owns the `/api/*` routing table, injects the HTTP Basic credential upstream |
-| `order-service` | 8080 (internal) | REST API; persists orders and orchestrates the workflow |
-| `inventory-service` | 8081 (internal) | Reserves or reverts product stock |
-| `shipping-service` | 8082 (internal) | Creates shipment records (only accepts orders between 10:00–18:00); Kafka-only, no REST surface |
-| `frontend` | 80 (Docker) / 4200 (dev) | React UI showing reactive vs. blocking order streaming; proxies `/api/` to the gateway |
+| `api-gateway` | 8080 | nginx gateway — the only API entry point; owns the `/api/*` routing table, injects the HTTP Basic credential upstream |
+| `order-service` | 8080 | REST API; persists orders and orchestrates the workflow |
+| `inventory-service` | 8081 | Reserves or reverts product stock |
+| `shipping-service` | 8082 | Creates shipment records (only accepts orders between 10:00–18:00); Kafka-only, no REST surface |
+| `frontend` | 80 (cluster) / 4200 (dev) | React UI showing reactive vs. blocking order streaming; proxies `/api/` to the gateway |
 
-Under docker-compose the backend service ports are **not** published to the host — all API traffic goes through the gateway on `localhost:8080` (which injects auth), or through the frontend on `localhost:80`. Backend swagger-ui/actuator are reachable via `docker compose exec`, not through the gateway (default-deny). When running a service directly on the host (`mvn spring-boot:run`), its port is local as usual.
+**Deployment is Kubernetes-only** — the Helm chart in `k8s/helm/reactive-systems` is the single deployment artifact. There is no docker-compose path; it was removed once the Testcontainers launchers and the Skaffold loop replaced it.
+
+In the cluster every backend Service is ClusterIP and only `frontend` is NodePort, so all API traffic arrives through the frontend's `/api/` proxy into the gateway. Backend swagger-ui/actuator are not routed by the gateway (default-deny) — reach them with `kubectl port-forward`. When running a service locally via its Testcontainers launcher, its port is local as usual.
 
 ## Build & Run Commands
 
@@ -29,37 +31,58 @@ mvn clean package -pl order-service,inventory-service,shipping-service
 # Build a single service
 mvn clean package -pl order-service
 
-# Run a single service (requires MongoDB + Kafka running first)
-mvn spring-boot:run -pl order-service
+# Run a single service with Mongo + Kafka supplied by Testcontainers.
+# Nothing to install or start first; containers are reaped on exit.
+mvn spring-boot:test-run -pl order-service      # port 8080
+mvn spring-boot:test-run -pl inventory-service  # port 8081
+mvn spring-boot:test-run -pl order-service-vt   # port 8083
 ```
+
+The launchers (`TestAsyncApplication`, `TestVirtualThreadOrderApplication`,
+under `src/test/java`) activate a `local` profile pinning the Basic
+credential to `dev`/`dev`, so local calls are scriptable instead of needing
+the random password Spring logs each boot. `mvn spring-boot:run` still works
+but expects MongoDB and Kafka to already be running somewhere.
 
 ### Frontend (React + Vite, plain JavaScript)
 
 Standard npm workflow in `frontend/` — see `frontend/package.json` scripts.
 
-### Run everything with Docker Compose
+### Run everything on a local cluster (Skaffold)
 
 ```bash
-docker-compose up --build
+skaffold dev                       # rebuild + redeploy on save, streaming logs
+skaffold dev -p app-only           # skip the monitoring stack for a faster loop
+skaffold dev -p order-service-java # Java order-service instead of the C# one
+skaffold run                       # one-shot build and deploy
+skaffold delete                    # tear down
 ```
 
-This starts: Zookeeper, Kafka (port 29092), MongoDB (port 27017), the backend services, the nginx `api-gateway`, and the nginx-served frontend.
+This deploys the same Helm chart CI deploys, so it exercises the real
+topology — gateway routing, credential injection, service-to-service calls,
+the Kafka saga. Use it before opening a PR; use the Testcontainers launchers
+above while iterating on a single service.
 
-The order-service variant is selected by compose profile; the gateway follows it via `ORDER_UPSTREAM`:
+The order-service variant is a chart value, not a build-time choice:
+`values.yaml` enables `orderServiceCs` and disables both Java variants. All
+three publish the same `order-service` Service name, so the gateway needs no
+change when switching — unlike the removed compose setup, which had to be
+told which container to target.
 
-```bash
-docker compose --profile order-service up --build                                          # Java (default upstream)
-ORDER_UPSTREAM=order-service-vt:8083 docker compose --profile order-service-vt up --build  # virtual threads
-ORDER_UPSTREAM=order-service-cs:8080 docker compose --profile order-service-cs up --build  # C#/.NET
-```
+Skaffold builds the Java services through `k8s/skaffold/build-java-image.sh`,
+which runs `mvn package` first because their Dockerfiles are not multi-stage
+(they `COPY target/*.jar`, exactly as CI does it).
 
 ## Infrastructure Dependencies
 
 All three Java services require:
-- **MongoDB** at `mongodb://localhost:27017/reactive-systems` — same database, separate collections
-- **Kafka** at `localhost:9092` — single topic named `orders`
+- **MongoDB** — same database, separate collections
+- **Kafka** — single topic named `orders`
 
-When running locally without Docker, start these before the services.
+The Testcontainers launchers supply both automatically for local runs, and
+the Helm chart deploys both in-cluster. `mvn spring-boot:run` and a plain
+`mvn test` of the integration tests are the only paths that expect them to
+already exist (`localhost:27017` / `localhost:9092`).
 
 ## Architecture: Event-Driven Order Workflow
 

@@ -1,11 +1,10 @@
 # reactive-systems Helm chart (minikube)
 
-Deploys the same pipeline as `docker-compose.yml` (Kafka, MongoDB,
-`order-service`, `inventory-service`, `shipping-service`, `frontend`) to a
-local minikube cluster. Kafka runs Zookeeper-less "KRaft" mode here (see
-"Kafka KRaft migration" below) rather than `docker-compose.yml`'s
-Zookeeper-based setup, so there's no separate Zookeeper component in this
-chart.
+Deploys the full pipeline (Kafka, MongoDB, `order-service`,
+`inventory-service`, `shipping-service`, `api-gateway`, `frontend`) to a
+local minikube cluster. This chart is the project's only deployment
+artifact. Kafka runs Zookeeper-less "KRaft" mode (see "Kafka KRaft
+migration" below), so there's no separate Zookeeper component.
 
 > ⚠️ **Demo only — not for production.** These services have no authentication or authorization; `GET /api/orders` exposes all order data (including customer PII) to any caller. Add auth and scope data access before any real deployment.
 
@@ -311,9 +310,9 @@ deployment would usually split those into a separate, smaller controller
 quorum, but that's unwarranted complexity at 3 nodes) and the cluster
 replicates its own metadata log via Raft rather than depending on an
 external Zookeeper ensemble - one less stateful dependency, and one less
-thing needing its own HA/backup story. `docker-compose.yml` is untouched
-and still runs Zookeeper-mode Kafka, matching how #40's broker HA fix
-also only touched this Helm chart.
+thing needing its own HA/backup story. The removed docker-compose setup
+ran Zookeeper-mode Kafka and was left alone at the time, matching how #40's
+broker HA fix also only touched this Helm chart.
 
 A `kafka-cluster-id` ConfigMap (`kafka-cluster-id.yaml`) holds the
 cluster's KRaft ID, generated once and persisted across `helm upgrade`

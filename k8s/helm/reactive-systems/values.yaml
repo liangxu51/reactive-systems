@@ -208,8 +208,9 @@ orderService:
 
 # Virtual-thread variant of order-service (see order-service-vt module).
 # Mutually exclusive with orderService/orderServiceCs: all three would
-# consume/produce on the same Kafka topic and Mongo collection, mirroring
-# the docker-compose profiles "order-service" / "order-service-vt".
+# consume/produce on the same Kafka topic and Mongo collection. Pick one;
+# all three publish the same "order-service" Service name, so nothing
+# downstream (the gateway included) changes when you switch.
 orderServiceVt:
   enabled: false
   image:
