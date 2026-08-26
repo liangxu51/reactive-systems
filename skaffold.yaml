@@ -1,0 +1,155 @@
+# Local-cluster dev loop: build the images, deploy the real Helm chart, watch
+# for changes.
+#
+#   skaffold dev     rebuild and redeploy on every save, streaming logs
+#   skaffold run     one-shot build and deploy
+#   skaffold delete  tear the release down
+#
+# This deploys the same chart CI deploys and production would, so what you
+# exercise here is the real topology - the gateway's routing and credential
+# injection, service-to-service calls, the Kafka saga - rather than an
+# approximation of it. For the fast inner loop on a single service, use its
+# Testcontainers launcher instead (mvn spring-boot:test-run -pl <service>);
+# this is the slower outer loop you run before opening a PR.
+apiVersion: skaffold/v4beta13
+kind: Config
+metadata:
+  name: reactive-systems
+
+build:
+  local:
+    # minikube's daemon is not the host's, and nothing here is registry-backed
+    # (the chart pins imagePullPolicy: IfNotPresent), so images are built where
+    # the cluster can already see them and never pushed.
+    push: false
+    concurrency: 0
+  artifacts:
+    # Java services: not multi-stage, so a custom builder runs mvn package
+    # first. Watching only src/main keeps test edits from triggering an image
+    # rebuild and redeploy.
+    - image: inventory-service
+      context: .
+      custom:
+        buildCommand: k8s/skaffold/build-java-image.sh inventory-service
+        dependencies:
+          paths:
+            - inventory-service/src/main/**
+            - inventory-service/pom.xml
+            - inventory-service/Dockerfile
+    - image: shipping-service
+      context: .
+      custom:
+        buildCommand: k8s/skaffold/build-java-image.sh shipping-service
+        dependencies:
+          paths:
+            - shipping-service/src/main/**
+            - shipping-service/pom.xml
+            - shipping-service/Dockerfile
+
+    # These three build from source inside their own Dockerfiles, so the
+    # built-in docker builder handles them with no help.
+    - image: order-service-cs
+      context: order-service-cs
+    - image: frontend
+      context: frontend
+    - image: api-gateway
+      context: api-gateway
+
+manifests:
+  helm:
+    releases:
+      - name: reactive-systems
+        chartPath: k8s/helm/reactive-systems
+        namespace: reactive-systems
+        createNamespace: true
+        # Skaffold tags each image with a content hash, so the chart has to be
+        # told the tag it just built rather than falling back to appVersion.
+        # Without this the cluster keeps serving whatever :0.0.6 happened to
+        # mean last time - exactly the stale-image trap values.yaml warns about
+        # under imagePullPolicy: IfNotPresent.
+        setValueTemplates:
+          inventoryService.image.repository: "{{.IMAGE_REPO_inventory_service}}"
+          inventoryService.image.tag: "{{.IMAGE_TAG_inventory_service}}"
+          shippingService.image.repository: "{{.IMAGE_REPO_shipping_service}}"
+          shippingService.image.tag: "{{.IMAGE_TAG_shipping_service}}"
+          orderServiceCs.image.repository: "{{.IMAGE_REPO_order_service_cs}}"
+          orderServiceCs.image.tag: "{{.IMAGE_TAG_order_service_cs}}"
+          frontend.image.repository: "{{.IMAGE_REPO_frontend}}"
+          frontend.image.tag: "{{.IMAGE_TAG_frontend}}"
+          apiGateway.image.repository: "{{.IMAGE_REPO_api_gateway}}"
+          apiGateway.image.tag: "{{.IMAGE_TAG_api_gateway}}"
+
+deploy:
+  helm: {}
+
+profiles:
+  # The chart ships with the C# order-service enabled and both Java variants
+  # off (values.yaml), so those are not built by default - building images
+  # nothing deploys would just slow every loop down. Select a variant to work
+  # on it:
+  #
+  #   skaffold dev -p order-service-java
+  #   skaffold dev -p order-service-vt
+  - name: order-service-java
+    patches:
+      - op: add
+        path: /build/artifacts/-
+        value:
+          image: order-service
+          context: .
+          custom:
+            buildCommand: k8s/skaffold/build-java-image.sh order-service
+            dependencies:
+              paths:
+                - order-service/src/main/**
+                - order-service/pom.xml
+                - order-service/Dockerfile
+    manifests:
+      helm:
+        releases:
+          - name: reactive-systems
+            chartPath: k8s/helm/reactive-systems
+            namespace: reactive-systems
+            createNamespace: true
+            setValues:
+              orderService.enabled: "true"
+              orderServiceCs.enabled: "false"
+            setValueTemplates:
+              orderService.image.repository: "{{.IMAGE_REPO_order_service}}"
+              orderService.image.tag: "{{.IMAGE_TAG_order_service}}"
+              inventoryService.image.repository: "{{.IMAGE_REPO_inventory_service}}"
+              inventoryService.image.tag: "{{.IMAGE_TAG_inventory_service}}"
+              shippingService.image.repository: "{{.IMAGE_REPO_shipping_service}}"
+              shippingService.image.tag: "{{.IMAGE_TAG_shipping_service}}"
+              frontend.image.repository: "{{.IMAGE_REPO_frontend}}"
+              frontend.image.tag: "{{.IMAGE_TAG_frontend}}"
+              apiGateway.image.repository: "{{.IMAGE_REPO_api_gateway}}"
+              apiGateway.image.tag: "{{.IMAGE_TAG_api_gateway}}"
+
+  # Skips the monitoring stack (kube-prometheus-stack, Loki, Jaeger and the
+  # exporters). They are the bulk of a cold install and are rarely what you are
+  # iterating on; drop them when you want the app topology and a fast loop.
+  - name: app-only
+    manifests:
+      helm:
+        releases:
+          - name: reactive-systems
+            chartPath: k8s/helm/reactive-systems
+            namespace: reactive-systems
+            createNamespace: true
+            setValues:
+              kube-prometheus-stack.enabled: "false"
+              loki.enabled: "false"
+              promtail.enabled: "false"
+              jaeger.enabled: "false"
+            setValueTemplates:
+              inventoryService.image.repository: "{{.IMAGE_REPO_inventory_service}}"
+              inventoryService.image.tag: "{{.IMAGE_TAG_inventory_service}}"
+              shippingService.image.repository: "{{.IMAGE_REPO_shipping_service}}"
+              shippingService.image.tag: "{{.IMAGE_TAG_shipping_service}}"
+              orderServiceCs.image.repository: "{{.IMAGE_REPO_order_service_cs}}"
+              orderServiceCs.image.tag: "{{.IMAGE_TAG_order_service_cs}}"
+              frontend.image.repository: "{{.IMAGE_REPO_frontend}}"
+              frontend.image.tag: "{{.IMAGE_TAG_frontend}}"
+              apiGateway.image.repository: "{{.IMAGE_REPO_api_gateway}}"
+              apiGateway.image.tag: "{{.IMAGE_TAG_api_gateway}}"
