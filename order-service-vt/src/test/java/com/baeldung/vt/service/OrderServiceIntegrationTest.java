@@ -33,8 +33,14 @@ class OrderServiceIntegrationTest {
     static final MongoDBContainer MONGO_DB_CONTAINER = new MongoDBContainer("mongo:4.4");
 
     @DynamicPropertySource
-    static void disableKafkaListenerAutoStart(DynamicPropertyRegistry registry) {
+    static void disableKafka(DynamicPropertyRegistry registry) {
         registry.add("spring.kafka.listener.auto-startup", () -> "false");
+        // These tests mock OrderProducer and disable the listener above, so no
+        // broker is needed - but KafkaAdmin still probes the configured
+        // bootstrap-servers at startup and blocks the context for its full 60s
+        // timeout ("Could not configure topics ... TimeoutException"). Skipping
+        // the admin bean takes this class from ~73s to ~31s.
+        registry.add("spring.kafka.admin.auto-create", () -> "false");
     }
 
     @Autowired
