@@ -2,6 +2,8 @@ bin/
 obj/
 order-service-cs.Tests/bin/
 order-service-cs.Tests/obj/
+OrderService.DevHost/bin/
+OrderService.DevHost/obj/
 **/.vs/
 **/.vscode/
 *.user

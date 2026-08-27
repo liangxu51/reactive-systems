@@ -20,12 +20,15 @@
   </ItemGroup>
 
   <!-- The default SDK globs pick up every *.cs file under this directory,
-       including the test project's - exclude it so the two projects don't
-       double-compile each other's sources. -->
+       including the test project's and the dev launcher's - exclude them so
+       the projects don't double-compile each other's sources. -->
   <ItemGroup>
     <Compile Remove="order-service-cs.Tests/**/*.cs" />
     <Content Remove="order-service-cs.Tests/**/*" />
     <None Remove="order-service-cs.Tests/**/*" />
+    <Compile Remove="OrderService.DevHost/**/*.cs" />
+    <Content Remove="OrderService.DevHost/**/*" />
+    <None Remove="OrderService.DevHost/**/*" />
   </ItemGroup>
 
 </Project>

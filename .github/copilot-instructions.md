@@ -32,6 +32,10 @@ mvn clean package -pl shipping-service
 # Run order-service locally with MongoDB + Kafka supplied by Testcontainers
 mvn spring-boot:test-run -pl order-service
 
+# Same for the C#/.NET implementation (separate project - .NET has no
+# spring-boot:test-run equivalent). Also 8080, so run one or the other.
+dotnet run --project order-service-cs/OrderService.DevHost
+
 # Build with hot-reload enabled (auto-restart on file changes)
 mvn compile -pl order-service
 ```
