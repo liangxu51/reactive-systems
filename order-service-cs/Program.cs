@@ -39,7 +39,14 @@ var builder = WebApplication.CreateBuilder(args);
 // outside the container once Task 5/6 run this under Docker/Kubernetes,
 // matching order-service (Java)'s server.port=8080 (Spring Boot also binds
 // 0.0.0.0 by default).
-builder.WebHost.UseUrls("http://0.0.0.0:8080");
+//
+// Read from configuration first so the default can be overridden the way
+// Spring's server.port can be (ASPNETCORE_URLS=http://0.0.0.0:8090, or a Urls
+// entry in appsettings). A bare UseUrls literal outranks both ASPNETCORE_URLS
+// and ASPNETCORE_HTTP_PORTS, which left no way to move the port for a local
+// run when something else already held 8080. The deployed default is
+// unchanged.
+builder.WebHost.UseUrls(builder.Configuration["Urls"] ?? "http://0.0.0.0:8080");
 
 // ---- Logging (Serilog, flat ECS-compatible JSON console output) ----
 // Replaces the default logging providers entirely so every log line -
@@ -168,7 +175,14 @@ builder.Services
         {
             options.JsonSerializerOptions.Converters.Add(converter);
         }
-    });
+    })
+    // Discover this assembly's controllers explicitly. MVC otherwise scans
+    // the *entry* assembly, which is this one when the app is launched
+    // normally but not when another host starts it in-process (see
+    // OrderService.DevHost) - there every route 404s while authentication
+    // still works, because auth is registered by hand and controllers are
+    // not. No effect on the deployed app, where the two assemblies coincide.
+    .AddApplicationPart(typeof(Program).Assembly);
 
 var app = builder.Build();
 

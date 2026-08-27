@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>OrderService.DevHost</RootNamespace>
+    <AssemblyName>OrderService.DevHost</AssemblyName>
+    <!-- No top-level statements here on purpose: they would synthesise a
+         second `Program` class in the global namespace and collide with the
+         API's `public partial class Program`, which this launcher needs to
+         reference to find the real entry point. -->
+    <StartupObject>OrderService.DevHost.DevHost</StartupObject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../OrderService.Api.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Testcontainers.Kafka" Version="4.14.0" />
+    <PackageReference Include="Testcontainers.MongoDb" Version="4.14.0" />
+  </ItemGroup>
+
+</Project>
