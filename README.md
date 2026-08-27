@@ -15,14 +15,18 @@ Deployment is Kubernetes-only, via the Helm chart in `k8s/helm/reactive-systems`
 Run the service under active development with MongoDB and Kafka supplied by Testcontainers. Nothing needs installing beyond Docker, and there is no infrastructure to start first:
 
 ```bash
-mvn spring-boot:test-run -pl order-service      # port 8080
-mvn spring-boot:test-run -pl inventory-service  # port 8081
-mvn spring-boot:test-run -pl order-service-vt   # port 8083
+mvn spring-boot:test-run -pl order-service      # port 8080  (Java)
+mvn spring-boot:test-run -pl inventory-service  # port 8081  (Java)
+mvn spring-boot:test-run -pl order-service-vt   # port 8083  (Java, virtual threads)
+
+dotnet run --project order-service-cs/OrderService.DevHost   # port 8080  (C#/.NET)
 ```
 
-Each launcher (`TestAsyncApplication`, `TestVirtualThreadOrderApplication`) can also be run from an IDE for a debugger on the app while its backing services stay real containers. They listen on different ports, so `order-service` and `order-service-vt` can run side by side to compare the reactive and virtual-thread stacks. Containers are torn down when the process exits.
+Each launcher (`TestAsyncApplication`, `TestVirtualThreadOrderApplication`, `OrderService.DevHost`) can also be run from an IDE for a debugger on the app while its backing services stay real containers. Containers are torn down when the process exits.
 
-The launchers activate a `local` profile that pins the HTTP Basic credential to `dev`/`dev`, so calls are scriptable rather than needing the random password Spring logs on each boot:
+`order-service` and `order-service-cs` are alternative implementations of the same service and both take port 8080, so run one at a time. `order-service-vt` uses 8083 and can run alongside either, to compare the reactive and virtual-thread stacks side by side.
+
+Every launcher pins the HTTP Basic credential to `dev`/`dev`, so calls are scriptable rather than needing the random password the framework would otherwise generate on each boot:
 
 ```bash
 curl -u dev:dev localhost:8080/api/orders
@@ -33,6 +37,57 @@ curl -u dev:dev localhost:8080/api/orders
 To exercise the API manually:
 - Use `order-service/requests.http` with the VS Code REST Client extension or IntelliJ's built-in HTTP Client.
 - Or browse `http://localhost:8080/swagger-ui.html` (springdoc-openapi, auto-generated from the controllers).
+
+#### Verifying a launcher is working
+
+The same four checks apply to any of them (adjust the port):
+
+```bash
+# 1. Authenticated request succeeds, unauthenticated is rejected.
+#    Both matter: 200 alone can come from something else already on the port.
+curl -s -o /dev/null -w '%{http_code}\n' -u dev:dev localhost:8080/api/orders   # 200
+curl -s -o /dev/null -w '%{http_code}\n' localhost:8080/api/orders              # 401
+
+# 2. Confirm it is your process answering, not a stray kubectl/k9s port-forward
+ss -ltnp | grep :8080
+
+# 3. Mongo and Kafka really came up (ports are random per run)
+docker ps --format '{{.Image}}\t{{.Ports}}' | grep -E 'mongo|kafka'
+
+# 4. Write path end to end - an order should persist and read back
+curl -s -u dev:dev -X POST localhost:8080/api/orders \
+  -H 'Content-Type: application/json' \
+  -d '{"userId":"local","lineItems":[{"quantity":1}],"total":10,
+       "paymentMode":"Cash on Delivery",
+       "shippingAddress":{"name":"D","house":"1","street":"M","city":"B","zip":"02101"},
+       "shippingDate":1790000000000}'
+curl -s -u dev:dev -H 'Accept: application/json' localhost:8080/api/orders
+```
+
+`shippingDate` is epoch milliseconds, not an ISO string — both implementations reject the latter.
+
+To confirm the Kafka round-trip rather than just the produce, look at the consumer group inside the broker container:
+
+```bash
+KC=$(docker ps --filter ancestor=confluentinc/cp-kafka:7.4.0 --format '{{.Names}}' | head -1)
+docker exec "$KC" kafka-consumer-groups --bootstrap-server localhost:9093 --describe --group orders
+```
+
+Note `localhost:9093`, the broker's internal listener — `9092` is published on a random host port and is not reachable by that name from inside the container. A healthy result shows the group with `LAG 0` and an end offset above zero.
+
+Two things to expect on a single-service run. The saga cannot complete, because the other services are not running — an order stays at `INITIATION_SUCCESS` (or reaches `RESERVE_INVENTORY` on the topic and stops). And the consumer uses `auto.offset.reset=latest`, so the very first order after a cold start can be produced before group assignment finishes and is then skipped; a second order always shows the round-trip.
+
+#### C#-specific notes
+
+`OrderService.DevHost` is a separate project rather than a flag, because .NET has no equivalent of `spring-boot:test-run`. It starts the containers, exports the same `Section__Key` variables the Helm chart sets, and then runs the real API in-process.
+
+The port is overridable, which the Java services get from `server.port`:
+
+```bash
+ASPNETCORE_URLS=http://0.0.0.0:8090 dotnet run --project order-service-cs/OrderService.DevHost
+```
+
+Useful when a `kubectl port-forward` or k9s session already holds 8080 — the symptom otherwise is `Failed to bind to address http://0.0.0.0:8080: address already in use` after the containers have already started.
 
 ### The whole system, real topology
 

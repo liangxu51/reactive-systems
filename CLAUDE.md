@@ -44,6 +44,39 @@ credential to `dev`/`dev`, so local calls are scriptable instead of needing
 the random password Spring logs each boot. `mvn spring-boot:run` still works
 but expects MongoDB and Kafka to already be running somewhere.
 
+### order-service-cs (.NET 10, ASP.NET Core)
+
+```bash
+# Run tests (there is no .sln - a bare `dotnet test` here runs zero tests)
+dotnet test order-service-cs/order-service-cs.Tests/OrderService.Api.Tests.csproj
+
+# Run with Mongo + Kafka supplied by Testcontainers, same as the Java
+# launchers above. Pins the Basic credential to dev/dev; port 8080.
+dotnet run --project order-service-cs/OrderService.DevHost
+```
+
+`OrderService.DevHost` is a separate project, not a flag: .NET has no
+equivalent of `spring-boot:test-run`. It starts the containers, exports the
+same `Section__Key` variables the Helm chart sets, then runs the real API
+in-process. Mongo runs as a single-node replica set because the driver's
+retryable writes need one.
+
+Override the port when something else holds 8080 (a `kubectl port-forward`
+or k9s session is the usual culprit):
+
+```bash
+ASPNETCORE_URLS=http://0.0.0.0:8090 dotnet run --project order-service-cs/OrderService.DevHost
+```
+
+`order-service` and `order-service-cs` are alternative implementations of the
+same service and both bind 8080 — run one at a time.
+
+Two gotchas when hosting this API from another process: MVC discovers
+controllers from the *entry* assembly, so `Program.cs` registers its own via
+`AddApplicationPart` (without it every route 404s while auth still works),
+and the bound URL is read from configuration rather than a `UseUrls` literal,
+which would outrank both `ASPNETCORE_URLS` and `ASPNETCORE_HTTP_PORTS`.
+
 ### Frontend (React + Vite, plain JavaScript)
 
 Standard npm workflow in `frontend/` — see `frontend/package.json` scripts.
