@@ -22,7 +22,7 @@ In the cluster every backend Service is ClusterIP and only `frontend` is NodePor
 
 ## Build & Run Commands
 
-### Java services (Maven multi-module, Java 21, Spring Boot 3)
+### Java services (Maven multi-module, Java 25, Spring Boot 4)
 
 ```bash
 # Build all three services from the root

@@ -19,7 +19,7 @@ This is a Baeldung tutorial on reactive systems in Java implementing a full-stac
 
 ## Build Commands
 
-**Root-level (Maven multi-module, Java 21, Spring Boot 3):**
+**Root-level (Maven multi-module, Java 25, Spring Boot 4):**
 ```bash
 # Build all Java services
 mvn clean package -pl order-service,inventory-service,shipping-service
@@ -225,7 +225,7 @@ Same applies to `Order`, `LineItem`, `Address`, and `ObjectIdSerializer`. These 
 ## Copilot Cloud Agent Setup
 
 The `.github/workflows/copilot-setup-steps.yml` file pre-configures Copilot's development environment with:
-- Java 21 and Maven (with dependency caching)
+- Java 25 and Maven (with dependency caching)
 - Node.js 20 and npm (with dependency caching)
 - Verification of compilability for Java services and frontend
 
